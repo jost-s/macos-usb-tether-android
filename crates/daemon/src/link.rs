@@ -96,12 +96,11 @@ impl Link {
     pub fn start(
         bulk_in: Box<dyn InEndpoint>,
         bulk_out: Box<dyn OutEndpoint>,
-        peer_mac: MacAddr,
+        host_mac: MacAddr,
         device_max_transfer_size: u32,
         rx_transfer_size: u32,
         sink: Arc<dyn IpSink>,
     ) -> Self {
-        let host_mac = ethernet::host_mac_for(peer_mac);
         info!("host MAC {host_mac} on the RNDIS link");
 
         let arp = Arc::new(Mutex::new(Arp::new(host_mac, Ipv4Addr::UNSPECIFIED)));
@@ -122,7 +121,6 @@ impl Link {
                 rx_transfer_size,
                 RxContext {
                     host_mac,
-                    peer_mac,
                     arp: arp.clone(),
                     tx: tx.clone(),
                     sink,
@@ -218,7 +216,6 @@ fn reap(bulk_out: &mut dyn OutEndpoint, timeout: Duration) {
 
 struct RxContext {
     host_mac: MacAddr,
-    peer_mac: MacAddr,
     arp: Arc<Mutex<Arp>>,
     tx: FrameSender,
     sink: Arc<dyn IpSink>,
@@ -372,13 +369,19 @@ fn handle_transfer(
                 Ok(None) => {}
                 Err(e) => trace!("bad ARP packet: {e}"),
             },
-            ETHERTYPE_IPV4 => handle_ipv4(ctx, dhcp, timer, frame.payload),
+            ETHERTYPE_IPV4 => handle_ipv4(ctx, dhcp, timer, frame.src, frame.payload),
             other => trace!("ignoring ethertype 0x{other:04x}"),
         }
     }
 }
 
-fn handle_ipv4(ctx: &RxContext, dhcp: &mut DhcpClient, timer: &mut DhcpTimer, payload: &[u8]) {
+fn handle_ipv4(
+    ctx: &RxContext,
+    dhcp: &mut DhcpClient,
+    timer: &mut DhcpTimer,
+    src_mac: MacAddr,
+    payload: &[u8],
+) {
     // DHCP replies are ours to consume; everything else goes to the tunnel.
     if let Ok(d) = ipv4::parse_udp(payload) {
         if d.dst_port == dhcp::CLIENT_PORT && d.src_port == dhcp::SERVER_PORT {
@@ -386,12 +389,12 @@ fn handle_ipv4(ctx: &RxContext, dhcp: &mut DhcpClient, timer: &mut DhcpTimer, pa
                 Ok(DhcpEvent::Send(msg)) => send_dhcp(ctx, &msg),
                 Ok(DhcpEvent::Bound(lease)) => {
                     timer.bound(&lease);
-                    ctx.arp.lock().expect("ARP lock").set_host_ip(lease.ip);
-                    // The server is the gateway; remember where the reply came from.
-                    ctx.arp
-                        .lock()
-                        .expect("ARP lock")
-                        .insert(d.src_ip, ctx.peer_mac);
+                    let mut arp = ctx.arp.lock().expect("ARP lock");
+                    arp.set_host_ip(lease.ip);
+                    // The reply came straight from the phone, so its source
+                    // address is the gateway's MAC.
+                    arp.insert(d.src_ip, src_mac);
+                    drop(arp);
                     let _ = ctx.events.send(LinkEvent::Bound(lease));
                 }
                 Ok(DhcpEvent::Nak) => timer.restart(),

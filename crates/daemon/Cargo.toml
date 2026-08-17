@@ -16,6 +16,7 @@ rndis-tether-netstack.workspace = true
 rndis-tether-tun.workspace = true
 
 anyhow.workspace = true
+libc.workspace = true
 env_logger.workspace = true
 log.workspace = true
 

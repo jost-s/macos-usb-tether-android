@@ -6,7 +6,7 @@ members = [
     "crates/netstack",
     "crates/tun",
     "crates/daemon",
-    # "crates/ctl",
+    "crates/ctl",
 ]
 
 [workspace.package]

@@ -12,4 +12,4 @@ pub mod ipv4;
 pub use arp::Arp;
 pub use dhcp::{DhcpClient, Event as DhcpEvent, Lease};
 pub use error::{Error, Result};
-pub use ethernet::{host_mac_for, MacAddr};
+pub use ethernet::MacAddr;

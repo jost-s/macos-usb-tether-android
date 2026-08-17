@@ -56,15 +56,6 @@ impl fmt::Debug for MacAddr {
     }
 }
 
-/// Our own MAC on the RNDIS link: locally administered, unicast, stable for a
-/// given phone, and never equal to the phone's own address.
-pub fn host_mac_for(peer: MacAddr) -> MacAddr {
-    let mut m = peer.0;
-    m[0] = (m[0] | 0x02) & 0xFE;
-    m[5] ^= 0x01;
-    MacAddr(m)
-}
-
 #[derive(Clone, Copy, Debug)]
 pub struct Frame<'a> {
     pub dst: MacAddr,
@@ -123,21 +114,6 @@ mod tests {
     #[test]
     fn rejects_a_frame_shorter_than_its_header() {
         assert!(matches!(parse(&[0u8; 13]), Err(Error::Truncated)));
-    }
-
-    #[test]
-    fn host_mac_is_locally_administered_and_distinct_from_the_phone() {
-        for peer in [
-            MacAddr([0x3e, 0x02, 0x24, 0x8f, 0xb0, 0xcc]),
-            MacAddr([0x02, 0, 0, 0, 0, 0]),
-            MacAddr([0xff, 0xff, 0xff, 0xff, 0xff, 0xff]),
-        ] {
-            let host = host_mac_for(peer);
-            assert_ne!(host, peer);
-            assert_eq!(host.0[0] & 0x02, 0x02, "must be locally administered");
-            assert_eq!(host.0[0] & 0x01, 0x00, "must be unicast");
-            assert_eq!(host, host_mac_for(peer), "must be stable");
-        }
     }
 
     #[test]

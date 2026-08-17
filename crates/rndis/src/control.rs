@@ -39,7 +39,9 @@ pub enum LinkState {
 /// What the device told us during bring-up.
 #[derive(Clone, Copy, Debug)]
 pub struct Session {
-    pub device_mac: [u8; 6],
+    /// The MAC the gadget designates for the *host* side of the link, as
+    /// Linux's rndis_host assigns to its own interface.
+    pub host_mac: [u8; 6],
     /// Largest transfer the device will accept from us.
     pub device_max_transfer_size: u32,
     pub max_packets_per_transfer: u32,
@@ -85,10 +87,10 @@ impl<T: ControlTransport> Rndis<T> {
             warn!("device reports non-802.3 medium {}", init.medium);
         }
 
-        let device_mac = self.query_mac()?;
+        let host_mac = self.query_mac()?;
         info!(
-            "phone MAC {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-            device_mac[0], device_mac[1], device_mac[2], device_mac[3], device_mac[4], device_mac[5]
+            "designated host MAC {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+            host_mac[0], host_mac[1], host_mac[2], host_mac[3], host_mac[4], host_mac[5]
         );
 
         self.set(
@@ -100,7 +102,7 @@ impl<T: ControlTransport> Rndis<T> {
         }
 
         Ok(Session {
-            device_mac,
+            host_mac,
             device_max_transfer_size: init.max_transfer_size,
             max_packets_per_transfer: init.max_packets_per_transfer.max(1),
             packet_alignment: init.packet_alignment.max(1),
@@ -371,7 +373,7 @@ mod tests {
         let mut rndis = Rndis::new(MockDevice::new(mac));
 
         let session = rndis.bring_up().unwrap();
-        assert_eq!(session.device_mac, mac);
+        assert_eq!(session.host_mac, mac);
         assert_eq!(session.device_max_transfer_size, 16384);
 
         let types: Vec<u32> = rndis
@@ -395,7 +397,7 @@ mod tests {
         device.fail_permanent_address = true;
         let mut rndis = Rndis::new(device);
 
-        assert_eq!(rndis.bring_up().unwrap().device_mac, mac);
+        assert_eq!(rndis.bring_up().unwrap().host_mac, mac);
     }
 
     #[test]
