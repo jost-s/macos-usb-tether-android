@@ -4,7 +4,7 @@ members = [
     "crates/usb",
     "crates/rndis",
     "crates/netstack",
-    # "crates/tun",
+    "crates/tun",
     "crates/daemon",
     # "crates/ctl",
 ]
@@ -19,7 +19,7 @@ license = "MIT"
 rndis-tether-usb = { path = "crates/usb" }
 rndis-tether-rndis = { path = "crates/rndis" }
 rndis-tether-netstack = { path = "crates/netstack" }
-# rndis-tether-tun = { path = "crates/tun" }
+rndis-tether-tun = { path = "crates/tun" }
 
 anyhow = "1"
 thiserror = "2"

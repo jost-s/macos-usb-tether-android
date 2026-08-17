@@ -31,15 +31,36 @@ pub trait IpSink: Send + Sync {
     fn deliver(&self, packet: &[u8]);
 }
 
-/// Counts packets and drops them; used before utun is up.
+/// The RX thread starts before the tunnel exists, so the real sink is swapped
+/// in once utun is up. Packets arriving before that are counted and dropped.
 #[derive(Default)]
-pub struct NullSink {
-    pub packets: AtomicU64,
+pub struct SwitchableSink {
+    inner: Mutex<Option<Arc<dyn IpSink>>>,
+    pub delivered: AtomicU64,
+    pub dropped: AtomicU64,
 }
 
-impl IpSink for NullSink {
-    fn deliver(&self, _packet: &[u8]) {
-        self.packets.fetch_add(1, Ordering::Relaxed);
+impl SwitchableSink {
+    pub fn attach(&self, sink: Arc<dyn IpSink>) {
+        *self.inner.lock().expect("sink lock") = Some(sink);
+    }
+
+    pub fn detach(&self) {
+        *self.inner.lock().expect("sink lock") = None;
+    }
+}
+
+impl IpSink for SwitchableSink {
+    fn deliver(&self, packet: &[u8]) {
+        match &*self.inner.lock().expect("sink lock") {
+            Some(sink) => {
+                self.delivered.fetch_add(1, Ordering::Relaxed);
+                sink.deliver(packet);
+            }
+            None => {
+                self.dropped.fetch_add(1, Ordering::Relaxed);
+            }
+        }
     }
 }
 
@@ -63,7 +84,6 @@ impl FrameSender {
 
 pub struct Link {
     pub host_mac: MacAddr,
-    pub peer_mac: MacAddr,
     pub arp: Arc<Mutex<Arp>>,
     pub tx: FrameSender,
     pub events: Receiver<LinkEvent>,
@@ -114,35 +134,12 @@ impl Link {
 
         Self {
             host_mac,
-            peer_mac,
             arp,
             tx,
             events: event_rx,
             shutdown,
             threads,
         }
-    }
-
-    /// Resolve the gateway's MAC, asking for it if needed. `None` means the
-    /// caller should retry after the reply arrives.
-    pub fn gateway_mac(&self, gateway: Ipv4Addr) -> Option<MacAddr> {
-        let mut arp = self.arp.lock().expect("ARP lock");
-        if let Some(mac) = arp.lookup(gateway) {
-            return Some(mac);
-        }
-        if let Some(request) = arp.request(gateway) {
-            self.tx.send(request);
-        }
-        None
-    }
-
-    pub fn set_host_ip(&self, ip: Ipv4Addr) {
-        self.arp.lock().expect("ARP lock").set_host_ip(ip);
-    }
-
-    /// Wrap an IP packet from utun for the RNDIS side.
-    pub fn frame_ip(&self, gateway_mac: MacAddr, packet: &[u8]) -> Vec<u8> {
-        ethernet::build(gateway_mac, self.host_mac, ETHERTYPE_IPV4, packet)
     }
 
     pub fn shutdown(self) {

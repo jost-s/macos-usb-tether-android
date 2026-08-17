@@ -13,6 +13,7 @@ path = "src/main.rs"
 rndis-tether-usb.workspace = true
 rndis-tether-rndis.workspace = true
 rndis-tether-netstack.workspace = true
+rndis-tether-tun.workspace = true
 
 anyhow.workspace = true
 env_logger.workspace = true

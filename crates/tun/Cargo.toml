@@ -1,0 +1,13 @@
+[package]
+name = "rndis-tether-tun"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+libc.workspace = true
+log.workspace = true
+system-configuration = "0.8"
+core-foundation = "0.10"

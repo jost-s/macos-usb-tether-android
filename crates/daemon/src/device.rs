@@ -12,8 +12,6 @@ use crate::transport::UsbControlTransport;
 
 /// An open, initialized RNDIS link.
 pub struct RndisDevice {
-    pub info: DeviceInfo,
-    pub function: RndisFunction,
     pub session: Session,
     pub control: Rndis<UsbControlTransport>,
     pub bulk_in: Box<dyn InEndpoint>,
@@ -110,8 +108,6 @@ pub fn open(
         .context("opening the bulk OUT endpoint")?;
 
     Ok(RndisDevice {
-        info,
-        function,
         session,
         control,
         bulk_in,
