@@ -47,11 +47,17 @@ fn main() -> Result<()> {
 
     signals::install();
 
+    // utun, routes and DNS all need root; fail here rather than after a
+    // successful RNDIS bring-up.
+    // SAFETY: geteuid cannot fail.
+    if unsafe { libc::geteuid() } != 0 {
+        anyhow::bail!("rndis-tetherd must run as root (try: sudo rndis-tetherd)");
+    }
+
     let backend = DefaultBackend::default();
-    // Without root there is no /var/run socket; the daemon still works for
-    // read-only probing, so this is a warning rather than a failure.
     let status = match StatusServer::start() {
         Ok(s) => Some(s),
+        // Losing the ctl socket is not worth refusing to tether over.
         Err(e) => {
             warn!("status socket unavailable: {e}");
             None

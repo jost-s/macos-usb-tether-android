@@ -21,6 +21,13 @@ pub struct Utun {
     name: String,
 }
 
+/// Whether the failure means "this unit is taken", as opposed to something that
+/// would defeat every unit equally — not being root, above all.
+fn is_unit_busy(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<io::Error>()
+        .is_some_and(|e| matches!(e.raw_os_error(), Some(libc::EBUSY) | Some(libc::EADDRINUSE)))
+}
+
 impl Utun {
     /// Open the first free utun device.
     pub fn open() -> Result<Self> {
@@ -28,7 +35,14 @@ impl Utun {
         for unit in 0..MAX_UNIT {
             match Self::open_unit(unit) {
                 Ok(utun) => return Ok(utun),
-                Err(e) => last_error = Some(e),
+                Err(e) => {
+                    // Only a busy unit is worth retrying; anything else applies
+                    // to every unit and would just repeat 255 times.
+                    if !is_unit_busy(&e) {
+                        return Err(e);
+                    }
+                    last_error = Some(e);
+                }
             }
         }
         bail!(
