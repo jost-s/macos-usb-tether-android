@@ -1,7 +1,7 @@
 //! Status shared with `rndis-tetherctl` over a unix socket.
 //!
-//! The wire format is one line of `key=value` pairs — enough for a status
-//! command, and readable with `nc` when debugging.
+//! One line of tab-separated `key=value` pairs. Tabs rather than spaces
+//! because values (the device name) contain spaces.
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::Ipv4Addr;
@@ -37,9 +37,10 @@ impl Status {
             .collect::<Vec<_>>()
             .join(",");
         format!(
-            "state={} device={} interface={} address={} gateway={} dns={} in={} out={}\n",
+            "state={}\tdevice={}\tinterface={}\taddress={}\tgateway={}\tdns={}\tin={}\tout={}\n",
             if self.link_up { "connected" } else { "waiting" },
-            self.device.as_deref().unwrap_or("-"),
+            // A tab in the descriptor string would break the framing.
+            self.device.as_deref().unwrap_or("-").replace('\t', " "),
             self.interface.as_deref().unwrap_or("-"),
             self.address.map_or("-".into(), |a| a.to_string()),
             self.gateway.map_or("-".into(), |a| a.to_string()),
@@ -150,8 +151,10 @@ mod tests {
             packets_out: 34,
         };
         let line = status.encode();
-        assert!(line.starts_with("state=connected "));
+        assert!(line.starts_with("state=connected\t"));
         assert!(line.contains("interface=utun4"));
+        // The device name has spaces; it must stay one field.
+        assert!(line.contains("device=Xiaomi Redmi Note 10S\t"));
         assert!(line.contains("address=10.71.51.112"));
         assert!(line.ends_with('\n'));
     }
@@ -159,8 +162,8 @@ mod tests {
     #[test]
     fn encodes_missing_fields_as_placeholders() {
         let line = Status::default().encode();
-        assert!(line.starts_with("state=waiting "));
-        assert!(line.contains("interface=- "));
-        assert!(line.contains("dns=- "));
+        assert!(line.starts_with("state=waiting\t"));
+        assert!(line.contains("interface=-\t"));
+        assert!(line.contains("dns=-\t"));
     }
 }

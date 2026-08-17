@@ -36,7 +36,7 @@ fn query(command: &str) -> anyhow::Result<String> {
 
 /// Turn the daemon's `key=value` line into readable output.
 fn print(reply: &str) {
-    for field in reply.trim().split(' ') {
+    for field in reply.trim_end().split('\t') {
         match field.split_once('=') {
             Some((key, value)) => println!("{key:<10} {value}"),
             None => println!("{field}"),

@@ -230,12 +230,11 @@ impl Tx {
         self.bytes
             .fetch_add(self.batch.len() as u64, Ordering::Relaxed);
         self.sent.fetch_add(self.packets, Ordering::Relaxed);
-        // Submitting hands the buffer away, so leave a fresh one of the same
-        // size rather than letting the next batch start from zero capacity.
-        let full = std::mem::replace(
-            &mut self.batch,
-            Vec::with_capacity(self.limits.max_transfer_size),
-        );
+        // Submitting hands the buffer away. Size its replacement from what this
+        // batch actually used: reserving the full transfer size every time
+        // would allocate ten times what a single unbatched frame needs.
+        let reuse = Vec::with_capacity(self.batch.len());
+        let full = std::mem::replace(&mut self.batch, reuse);
         self.bulk_out.submit(full);
         self.packets = 0;
         reap(self.bulk_out.as_mut(), Duration::ZERO);
