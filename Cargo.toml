@@ -5,7 +5,7 @@ members = [
     "crates/rndis",
     # "crates/netstack",
     # "crates/tun",
-    # "crates/daemon",
+    "crates/daemon",
     # "crates/ctl",
 ]
 

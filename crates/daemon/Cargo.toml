@@ -1,0 +1,21 @@
+[package]
+name = "rndis-tether-daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rndis-tetherd"
+path = "src/main.rs"
+
+[dependencies]
+rndis-tether-usb.workspace = true
+rndis-tether-rndis.workspace = true
+
+anyhow.workspace = true
+env_logger.workspace = true
+log.workspace = true
+
+[features]
+libusb = ["rndis-tether-usb/libusb"]
