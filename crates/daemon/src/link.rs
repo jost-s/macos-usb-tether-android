@@ -99,6 +99,9 @@ pub struct Link {
     pub host_mac: MacAddr,
     /// Frames handed to the bulk OUT endpoint.
     pub sent: Arc<AtomicU64>,
+    /// Bulk transfers those frames were packed into; `sent / transfers` is the
+    /// batching ratio actually achieved.
+    pub transfers: Arc<AtomicU64>,
     pub bytes_out: Arc<AtomicU64>,
     pub arp: Arc<Mutex<Arp>>,
     pub tx: FrameSender,
@@ -125,6 +128,7 @@ impl Link {
         let (event_tx, event_rx) = mpsc::channel();
         let tx = FrameSender(frame_tx);
         let sent = Arc::new(AtomicU64::new(0));
+        let transfers = Arc::new(AtomicU64::new(0));
         let bytes_out = Arc::new(AtomicU64::new(0));
 
         let threads = vec![
@@ -135,6 +139,7 @@ impl Link {
                     frame_rx,
                     limits,
                     sent.clone(),
+                    transfers.clone(),
                     bytes_out.clone(),
                     shutdown.clone(),
                 ),
@@ -159,6 +164,7 @@ impl Link {
         Self {
             host_mac,
             sent,
+            transfers,
             bytes_out,
             arp,
             tx,
@@ -192,6 +198,7 @@ struct Tx {
     batch: Vec<u8>,
     packets: u64,
     sent: Arc<AtomicU64>,
+    transfers: Arc<AtomicU64>,
     bytes: Arc<AtomicU64>,
     shutdown: Arc<AtomicBool>,
 }
@@ -230,6 +237,7 @@ impl Tx {
         self.bytes
             .fetch_add(self.batch.len() as u64, Ordering::Relaxed);
         self.sent.fetch_add(self.packets, Ordering::Relaxed);
+        self.transfers.fetch_add(1, Ordering::Relaxed);
         // Submitting hands the buffer away. Size its replacement from what this
         // batch actually used: reserving the full transfer size every time
         // would allocate ten times what a single unbatched frame needs.
@@ -246,6 +254,7 @@ fn tx_loop(
     frames: Receiver<Vec<u8>>,
     limits: TxLimits,
     sent: Arc<AtomicU64>,
+    transfers: Arc<AtomicU64>,
     bytes: Arc<AtomicU64>,
     shutdown: Arc<AtomicBool>,
 ) -> impl FnOnce() {
@@ -257,6 +266,7 @@ fn tx_loop(
             limits,
             packets: 0,
             sent,
+            transfers,
             bytes,
             shutdown: shutdown.clone(),
         };

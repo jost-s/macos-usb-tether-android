@@ -195,6 +195,7 @@ fn run_session(
             let sent = link.sent.load(Ordering::Relaxed);
             let bytes_in = sink.bytes_in.load(Ordering::Relaxed);
             let bytes_out = link.bytes_out.load(Ordering::Relaxed);
+            let transfers = link.transfers.load(Ordering::Relaxed).max(1);
             if let Some(s) = status {
                 s.update(|st| {
                     st.packets_in = delivered;
@@ -206,11 +207,12 @@ fn run_session(
             };
             match &tunnel {
                 Some(t) => info!(
-                    "{} up, link {:?}, {:.1}/{:.1} Mbit/s in/out, {delivered} in / {sent} out",
+                    "{} up, link {:?}, {:.1}/{:.1} Mbit/s in/out, {delivered} in / {sent} out, {:.2} frames/transfer",
                     t.utun.name(),
                     device.control.link_state(),
                     rate(bytes_in, last_in),
                     rate(bytes_out, last_out),
+                    sent as f64 / transfers as f64,
                 ),
                 None => warn!("still waiting for a DHCP lease"),
             }
