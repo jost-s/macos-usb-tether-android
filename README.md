@@ -15,7 +15,7 @@ interface with a DHCP-obtained address and the default route.
 ## Install
 
 ```sh
-cargo install --git https://github.com/jost/macos-usb-tether-android muta
+cargo install --git https://github.com/jost-s/macos-usb-tether-android muta
 ```
 
 Then enable **USB tethering** on the phone (on stock Android: Settings →

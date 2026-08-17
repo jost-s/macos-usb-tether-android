@@ -15,9 +15,9 @@ use log::info;
 
 use crate::status::SOCKET_PATH;
 
-pub const LABEL: &str = "dev.jost.muta";
+pub const LABEL: &str = "com.github.jost-s.muta";
 const INSTALL_DIR: &str = "/usr/local/libexec/muta";
-const PLIST_PATH: &str = "/Library/LaunchDaemons/dev.jost.muta.plist";
+const PLIST_PATH: &str = "/Library/LaunchDaemons/com.github.jost-s.muta.plist";
 const NEWSYSLOG_PATH: &str = "/etc/newsyslog.d/muta.conf";
 pub const LOG_PATH: &str = "/var/log/muta.log";
 
