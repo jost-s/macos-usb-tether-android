@@ -13,11 +13,11 @@ use rndis_tether_netstack::dhcp::{self, DhcpClient, Event as DhcpEvent, Lease};
 use rndis_tether_netstack::ethernet::{self, MacAddr, ETHERTYPE_ARP, ETHERTYPE_IPV4};
 use rndis_tether_netstack::ipv4::{self, UdpDatagram};
 use rndis_tether_netstack::Arp;
-use rndis_tether_rndis::packet;
+use rndis_tether_rndis::{packet, wire};
 use rndis_tether_usb::{InEndpoint, OutEndpoint};
 
 /// Reads kept queued on the bulk IN endpoint to cover USB round-trip latency.
-const RX_DEPTH: usize = 8;
+const RX_DEPTH: usize = 16;
 /// Cap on writes in flight before the TX thread waits for a completion.
 const TX_DEPTH: usize = 8;
 /// How long threads block before re-checking the shutdown flag.
@@ -37,6 +37,7 @@ pub trait IpSink: Send + Sync {
 pub struct SwitchableSink {
     inner: Mutex<Option<Arc<dyn IpSink>>>,
     pub delivered: AtomicU64,
+    pub bytes_in: AtomicU64,
     pub dropped: AtomicU64,
 }
 
@@ -55,6 +56,8 @@ impl IpSink for SwitchableSink {
         match &*self.inner.lock().expect("sink lock") {
             Some(sink) => {
                 self.delivered.fetch_add(1, Ordering::Relaxed);
+                self.bytes_in
+                    .fetch_add(packet.len() as u64, Ordering::Relaxed);
                 sink.deliver(packet);
             }
             None => {
@@ -62,6 +65,16 @@ impl IpSink for SwitchableSink {
             }
         }
     }
+}
+
+/// What the device said it can accept in one bulk transfer.
+#[derive(Clone, Copy, Debug)]
+pub struct TxLimits {
+    pub max_transfer_size: usize,
+    /// `MaxPacketsPerTransfer`. The stock Linux gadget reports 1, which
+    /// disables batching; vendors that patched theirs report more.
+    pub max_packets: usize,
+    pub alignment: usize,
 }
 
 #[derive(Debug)]
@@ -86,6 +99,7 @@ pub struct Link {
     pub host_mac: MacAddr,
     /// Frames handed to the bulk OUT endpoint.
     pub sent: Arc<AtomicU64>,
+    pub bytes_out: Arc<AtomicU64>,
     pub arp: Arc<Mutex<Arp>>,
     pub tx: FrameSender,
     pub events: Receiver<LinkEvent>,
@@ -99,7 +113,7 @@ impl Link {
         bulk_in: Box<dyn InEndpoint>,
         bulk_out: Box<dyn OutEndpoint>,
         host_mac: MacAddr,
-        device_max_transfer_size: u32,
+        limits: TxLimits,
         rx_transfer_size: u32,
         sink: Arc<dyn IpSink>,
     ) -> Self {
@@ -111,6 +125,7 @@ impl Link {
         let (event_tx, event_rx) = mpsc::channel();
         let tx = FrameSender(frame_tx);
         let sent = Arc::new(AtomicU64::new(0));
+        let bytes_out = Arc::new(AtomicU64::new(0));
 
         let threads = vec![
             spawn(
@@ -118,8 +133,9 @@ impl Link {
                 tx_loop(
                     bulk_out,
                     frame_rx,
-                    device_max_transfer_size,
+                    limits,
                     sent.clone(),
+                    bytes_out.clone(),
                     shutdown.clone(),
                 ),
             ),
@@ -143,6 +159,7 @@ impl Link {
         Self {
             host_mac,
             sent,
+            bytes_out,
             arp,
             tx,
             events: event_rx,
@@ -167,53 +184,116 @@ fn spawn(name: &str, body: impl FnOnce() + Send + 'static) -> JoinHandle<()> {
         .expect("spawning a link thread")
 }
 
-fn tx_loop(
-    mut bulk_out: Box<dyn OutEndpoint>,
-    frames: Receiver<Vec<u8>>,
-    max_transfer_size: u32,
+/// Packs outbound frames into as few bulk transfers as the device allows.
+struct Tx {
+    bulk_out: Box<dyn OutEndpoint>,
+    limits: TxLimits,
+    max_packet: usize,
+    batch: Vec<u8>,
+    packets: u64,
     sent: Arc<AtomicU64>,
+    bytes: Arc<AtomicU64>,
+    shutdown: Arc<AtomicBool>,
+}
+
+impl Tx {
+    /// Whether `frame` still fits the transfer being built.
+    fn fits(&self, frame: &[u8]) -> bool {
+        self.packets < self.limits.max_packets as u64
+            && self.batch.len() + wire::DATA_HEADER_LEN + frame.len()
+                <= self.limits.max_transfer_size
+    }
+
+    fn push(&mut self, frame: &[u8]) {
+        packet::append(&mut self.batch, frame, self.limits.alignment);
+        self.packets += 1;
+    }
+
+    fn flush(&mut self) {
+        if self.packets == 0 {
+            return;
+        }
+        // A transfer that is an exact multiple of the packet size would need a
+        // zero-length packet to terminate; one byte past the last msg_len is
+        // cheaper, and every parser stops before a partial header.
+        if self.batch.len() % self.max_packet == 0 {
+            self.batch.push(0);
+        }
+
+        // Bound the queue so a stalled endpoint cannot grow it without limit.
+        while self.bulk_out.pending() >= TX_DEPTH {
+            if self.bulk_out.wait(TICK).is_none() && self.shutdown.load(Ordering::Relaxed) {
+                return;
+            }
+        }
+
+        self.bytes
+            .fetch_add(self.batch.len() as u64, Ordering::Relaxed);
+        self.sent.fetch_add(self.packets, Ordering::Relaxed);
+        // Submitting hands the buffer away, so leave a fresh one of the same
+        // size rather than letting the next batch start from zero capacity.
+        let full = std::mem::replace(
+            &mut self.batch,
+            Vec::with_capacity(self.limits.max_transfer_size),
+        );
+        self.bulk_out.submit(full);
+        self.packets = 0;
+        reap(self.bulk_out.as_mut(), Duration::ZERO);
+    }
+}
+
+fn tx_loop(
+    bulk_out: Box<dyn OutEndpoint>,
+    frames: Receiver<Vec<u8>>,
+    limits: TxLimits,
+    sent: Arc<AtomicU64>,
+    bytes: Arc<AtomicU64>,
     shutdown: Arc<AtomicBool>,
 ) -> impl FnOnce() {
     move || {
-        let max_packet = bulk_out.max_packet_size().max(1);
+        let mut tx = Tx {
+            max_packet: bulk_out.max_packet_size().max(1),
+            batch: Vec::with_capacity(limits.max_transfer_size),
+            bulk_out,
+            limits,
+            packets: 0,
+            sent,
+            bytes,
+            shutdown: shutdown.clone(),
+        };
+
         while !shutdown.load(Ordering::Relaxed) {
             let frame = match frames.recv_timeout(TICK) {
                 Ok(f) => f,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    reap(bulk_out.as_mut(), Duration::ZERO);
+                    reap(tx.bulk_out.as_mut(), Duration::ZERO);
                     continue;
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             };
 
-            let mut msg = packet::encode(&frame);
-            if msg.len() > max_transfer_size as usize {
-                warn!(
-                    "dropping a {}-byte frame: over the device limit",
-                    frame.len()
-                );
-                continue;
-            }
-            // A transfer that is an exact multiple of the packet size would
-            // need a zero-length packet to terminate; one padding byte past
-            // msg_len is cheaper and the device ignores it.
-            if msg.len() % max_packet == 0 {
-                msg.push(0);
-            }
-
-            // Bound the queue so a stalled endpoint cannot grow it without limit.
-            while bulk_out.pending() >= TX_DEPTH {
-                if bulk_out.wait(TICK).is_none() && shutdown.load(Ordering::Relaxed) {
-                    return;
+            // Fill one transfer with whatever is already queued, then keep
+            // draining so a burst costs one transfer per batch, not per frame.
+            let mut next = Some(frame);
+            while let Some(frame) = next.take() {
+                if !tx.fits(&frame) {
+                    tx.flush();
+                    if !tx.fits(&frame) {
+                        warn!(
+                            "dropping a {}-byte frame: over the device limit",
+                            frame.len()
+                        );
+                        break;
+                    }
                 }
+                tx.push(&frame);
+                next = frames.try_recv().ok();
             }
-            bulk_out.submit(msg);
-            sent.fetch_add(1, Ordering::Relaxed);
-            reap(bulk_out.as_mut(), Duration::ZERO);
+            tx.flush();
         }
 
         // Let anything already queued finish before the endpoint is dropped.
-        reap(bulk_out.as_mut(), Duration::from_millis(500));
+        reap(tx.bulk_out.as_mut(), Duration::from_millis(500));
     }
 }
 

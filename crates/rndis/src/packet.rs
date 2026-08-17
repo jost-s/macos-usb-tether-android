@@ -6,12 +6,21 @@
 use crate::error::{Error, Result};
 use crate::wire::{u32_at, DATA_HEADER_LEN, MSG_PACKET, OFFSET_BASE};
 
-/// Wrap an Ethernet frame in a PACKET_MSG.
-pub fn encode(frame: &[u8]) -> Vec<u8> {
-    let mut msg = Vec::with_capacity(DATA_HEADER_LEN + frame.len());
+/// Append a PACKET_MSG for `frame`, padded so the next message begins on an
+/// `alignment` boundary.
+///
+/// Several messages may share one bulk transfer, but only up to the device's
+/// advertised `MaxPacketsPerTransfer` — the stock Linux gadget parses exactly
+/// one and says so.
+pub fn append(out: &mut Vec<u8>, frame: &[u8], alignment: usize) {
+    let body = DATA_HEADER_LEN + frame.len();
+    // Padding sits past the payload, so data_offset and data_len are unaffected.
+    let msg_len = body.next_multiple_of(alignment.max(1));
+
+    out.reserve(msg_len);
     let fields: [u32; 11] = [
         MSG_PACKET,
-        (DATA_HEADER_LEN + frame.len()) as u32,
+        msg_len as u32,
         (DATA_HEADER_LEN - OFFSET_BASE) as u32, // data offset, relative to byte 8
         frame.len() as u32,
         0, // OOB data offset
@@ -23,9 +32,16 @@ pub fn encode(frame: &[u8]) -> Vec<u8> {
         0, // reserved
     ];
     for f in fields {
-        msg.extend_from_slice(&f.to_le_bytes());
+        out.extend_from_slice(&f.to_le_bytes());
     }
-    msg.extend_from_slice(frame);
+    out.extend_from_slice(frame);
+    out.resize(out.len() + (msg_len - body), 0);
+}
+
+/// Wrap a single Ethernet frame in a PACKET_MSG.
+pub fn encode(frame: &[u8]) -> Vec<u8> {
+    let mut msg = Vec::with_capacity(DATA_HEADER_LEN + frame.len());
+    append(&mut msg, frame, 1);
     msg
 }
 
@@ -176,6 +192,36 @@ mod tests {
         let results: Vec<_> = decode(&buf).collect();
         assert_eq!(results.len(), 1);
         assert!(results[0].is_err());
+    }
+
+    #[test]
+    fn appends_several_frames_into_one_transfer() {
+        let (a, b, c) = (frame(64), frame(100), frame(1514));
+        let mut buf = Vec::new();
+        for f in [&a, &b, &c] {
+            append(&mut buf, f, 1);
+        }
+        assert_eq!(collect(&buf).unwrap(), vec![a, b, c]);
+    }
+
+    #[test]
+    fn alignment_padding_keeps_frames_intact_and_aligned() {
+        let (a, b) = (frame(65), frame(101));
+        let mut buf = Vec::new();
+        append(&mut buf, &a, 8);
+        let first_len = buf.len();
+        append(&mut buf, &b, 8);
+
+        assert_eq!(first_len % 8, 0, "next message must start aligned");
+        assert_eq!(collect(&buf).unwrap(), vec![a, b]);
+    }
+
+    #[test]
+    fn alignment_of_zero_is_treated_as_one() {
+        let f = frame(64);
+        let mut buf = Vec::new();
+        append(&mut buf, &f, 0);
+        assert_eq!(collect(&buf).unwrap(), vec![f]);
     }
 
     #[test]

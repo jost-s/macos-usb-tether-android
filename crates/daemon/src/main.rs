@@ -20,7 +20,7 @@ mod status;
 mod transport;
 mod tunnel;
 
-use link::{Link, LinkEvent, SwitchableSink};
+use link::{Link, LinkEvent, SwitchableSink, TxLimits};
 use status::{Status, StatusServer};
 use tunnel::Tunnel;
 
@@ -122,13 +122,22 @@ fn run_session(
         device.bulk_in,
         device.bulk_out,
         MacAddr(device.session.host_mac),
-        device.session.device_max_transfer_size,
+        TxLimits {
+            max_transfer_size: device.session.device_max_transfer_size as usize,
+            max_packets: device.session.max_packets_per_transfer as usize,
+            alignment: device.session.packet_alignment as usize,
+        },
         HOST_MAX_TRANSFER_SIZE,
         sink.clone(),
+    );
+    info!(
+        "TX batching: up to {} packets / {} B per transfer",
+        device.session.max_packets_per_transfer, device.session.device_max_transfer_size
     );
 
     let mut tunnel: Option<Tunnel> = None;
     let mut next_keepalive = Instant::now() + KEEPALIVE_INTERVAL;
+    let (mut last_in, mut last_out) = (0u64, 0u64);
 
     let result = loop {
         if signals::requested() {
@@ -184,20 +193,28 @@ fn run_session(
             }
             let delivered = sink.delivered.load(Ordering::Relaxed);
             let sent = link.sent.load(Ordering::Relaxed);
+            let bytes_in = sink.bytes_in.load(Ordering::Relaxed);
+            let bytes_out = link.bytes_out.load(Ordering::Relaxed);
             if let Some(s) = status {
                 s.update(|st| {
                     st.packets_in = delivered;
                     st.packets_out = sent;
                 });
             }
+            let rate = |bytes: u64, before: u64| {
+                (bytes.saturating_sub(before)) as f64 * 8.0 / KEEPALIVE_INTERVAL.as_secs_f64() / 1e6
+            };
             match &tunnel {
                 Some(t) => info!(
-                    "{} up, link {:?}, {delivered} in / {sent} out",
+                    "{} up, link {:?}, {:.1}/{:.1} Mbit/s in/out, {delivered} in / {sent} out",
                     t.utun.name(),
-                    device.control.link_state()
+                    device.control.link_state(),
+                    rate(bytes_in, last_in),
+                    rate(bytes_out, last_out),
                 ),
                 None => warn!("still waiting for a DHCP lease"),
             }
+            (last_in, last_out) = (bytes_in, bytes_out);
         }
     };
 

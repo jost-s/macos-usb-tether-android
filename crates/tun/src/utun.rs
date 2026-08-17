@@ -141,12 +141,21 @@ impl Utun {
             _ => return Ok(()),
         };
 
-        let mut buf = Vec::with_capacity(AF_HEADER_LEN + packet.len());
-        buf.extend_from_slice(&family.to_be_bytes());
-        buf.extend_from_slice(packet);
+        // writev keeps the header separate, so the packet is never copied.
+        let header = family.to_be_bytes();
+        let iov = [
+            libc::iovec {
+                iov_base: header.as_ptr() as *mut libc::c_void,
+                iov_len: header.len(),
+            },
+            libc::iovec {
+                iov_base: packet.as_ptr() as *mut libc::c_void,
+                iov_len: packet.len(),
+            },
+        ];
 
-        // SAFETY: `buf` is a live slice of the length passed.
-        let n = unsafe { libc::write(self.as_raw_fd(), buf.as_ptr().cast(), buf.len()) };
+        // SAFETY: both iovecs point at live slices for the duration of the call.
+        let n = unsafe { libc::writev(self.as_raw_fd(), iov.as_ptr(), iov.len() as libc::c_int) };
         if n < 0 {
             return Err(io::Error::last_os_error()).context("writing to utun");
         }
