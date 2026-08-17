@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "crates/usb",
-    # "crates/rndis",
+    "crates/rndis",
     # "crates/netstack",
     # "crates/tun",
     # "crates/daemon",
@@ -17,7 +17,7 @@ license = "MIT"
 
 [workspace.dependencies]
 rndis-tether-usb = { path = "crates/usb" }
-# rndis-tether-rndis = { path = "crates/rndis" }
+rndis-tether-rndis = { path = "crates/rndis" }
 # rndis-tether-netstack = { path = "crates/netstack" }
 # rndis-tether-tun = { path = "crates/tun" }
 
