@@ -52,7 +52,7 @@ pub fn install() -> Result<()> {
     write_root_file(Path::new(PLIST_PATH), &plist(&target), 0o644)?;
     write_root_file(Path::new(NEWSYSLOG_PATH), NEWSYSLOG_CONF, 0o644)?;
 
-    launchctl(&["bootstrap", "system", PLIST_PATH])?;
+    bootstrap()?;
     // Enable is separate: a previous `bootout` can leave the label disabled.
     let _ = launchctl(&["enable", &format!("system/{LABEL}")]);
 
@@ -129,6 +129,22 @@ fn write_root_file(path: &Path, contents: &str, mode: u32) -> Result<()> {
     chown_root(path)?;
     info!("wrote {}", path.display());
     Ok(())
+}
+
+/// launchd rejects a bootstrap while the previous job is still exiting, so give
+/// it a moment rather than failing a reinstall.
+fn bootstrap() -> Result<()> {
+    let mut last = None;
+    for attempt in 0..10 {
+        match launchctl(&["bootstrap", "system", PLIST_PATH]) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last = Some(e);
+                std::thread::sleep(std::time::Duration::from_millis(200 * (attempt + 1)));
+            }
+        }
+    }
+    Err(last.expect("at least one attempt"))
 }
 
 fn launchctl(args: &[&str]) -> Result<()> {
