@@ -2,8 +2,8 @@
 
 use anyhow::{anyhow, Context, Result};
 use log::{debug, info, warn};
-use rndis_tether_rndis::{Rndis, Session};
-use rndis_tether_usb::{
+use muta_rndis::{Rndis, Session};
+use muta_usb::{
     find_rndis, DeviceInfo, InEndpoint, OutEndpoint, RndisFunction, TransferType, UsbBackend,
     UsbDevice,
 };

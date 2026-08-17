@@ -9,12 +9,12 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use log::{debug, error, info, trace, warn};
-use rndis_tether_netstack::dhcp::{self, DhcpClient, Event as DhcpEvent, Lease};
-use rndis_tether_netstack::ethernet::{self, MacAddr, ETHERTYPE_ARP, ETHERTYPE_IPV4};
-use rndis_tether_netstack::ipv4::{self, UdpDatagram};
-use rndis_tether_netstack::Arp;
-use rndis_tether_rndis::{packet, wire};
-use rndis_tether_usb::{InEndpoint, OutEndpoint};
+use muta_netstack::dhcp::{self, DhcpClient, Event as DhcpEvent, Lease};
+use muta_netstack::ethernet::{self, MacAddr, ETHERTYPE_ARP, ETHERTYPE_IPV4};
+use muta_netstack::ipv4::{self, UdpDatagram};
+use muta_netstack::Arp;
+use muta_rndis::{packet, wire};
+use muta_usb::{InEndpoint, OutEndpoint};
 
 /// Reads kept queued on the bulk IN endpoint to cover USB round-trip latency.
 const RX_DEPTH: usize = 16;

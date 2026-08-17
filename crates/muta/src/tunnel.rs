@@ -8,8 +8,8 @@ use std::thread::JoinHandle;
 
 use anyhow::{Context, Result};
 use log::{debug, info, warn};
-use rndis_tether_netstack::Lease;
-use rndis_tether_tun::{configure_interface, net, Dns, Routes, Utun};
+use muta_netstack::Lease;
+use muta_tun::{configure_interface, net, Dns, Routes, Utun};
 
 use crate::link::{IpSink, Link};
 
@@ -125,7 +125,7 @@ fn spawn_reader(
     std::thread::Builder::new()
         .name("utun-rx".into())
         .spawn(move || {
-            let mut buf = vec![0u8; mtu as usize + rndis_tether_tun::utun::AF_HEADER_LEN + 64];
+            let mut buf = vec![0u8; mtu as usize + muta_tun::utun::AF_HEADER_LEN + 64];
             while !shutdown.load(Ordering::Relaxed) {
                 let len = match utun.read(&mut buf) {
                     Ok(0) => continue,
@@ -150,10 +150,10 @@ fn spawn_reader(
                     }
                 };
 
-                tx.send(rndis_tether_netstack::ethernet::build(
+                tx.send(muta_netstack::ethernet::build(
                     gateway_mac,
                     host_mac,
-                    rndis_tether_netstack::ethernet::ETHERTYPE_IPV4,
+                    muta_netstack::ethernet::ETHERTYPE_IPV4,
                     &buf[..len],
                 ));
             }

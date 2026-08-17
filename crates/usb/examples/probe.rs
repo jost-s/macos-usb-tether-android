@@ -1,8 +1,8 @@
 //! Enumerate USB devices, dump descriptors, and report which one exposes RNDIS.
 //!
-//! `cargo run -p rndis-tether-usb --example probe [--watch]`
+//! `cargo run -p muta-usb --example probe [--watch]`
 
-use rndis_tether_usb::{find_rndis, HotplugEvent, NusbBackend, UsbBackend};
+use muta_usb::{find_rndis, HotplugEvent, NusbBackend, UsbBackend};
 use std::time::Duration;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

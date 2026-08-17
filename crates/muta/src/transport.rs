@@ -4,11 +4,9 @@
 use std::time::Duration;
 
 use log::trace;
-use rndis_tether_rndis::error::{Error as RndisError, Result as RndisResult};
-use rndis_tether_rndis::{wire, ControlTransport};
-use rndis_tether_usb::{
-    ControlSetup, ControlType, InEndpoint, Recipient, TransferType, UsbInterface,
-};
+use muta_rndis::error::{Error as RndisError, Result as RndisResult};
+use muta_rndis::{wire, ControlTransport};
+use muta_usb::{ControlSetup, ControlType, InEndpoint, Recipient, TransferType, UsbInterface};
 
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
 /// Reads kept queued on the interrupt endpoint.

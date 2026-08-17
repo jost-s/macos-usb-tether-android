@@ -5,8 +5,7 @@ members = [
     "crates/rndis",
     "crates/netstack",
     "crates/tun",
-    "crates/daemon",
-    "crates/ctl",
+    "crates/muta",
 ]
 
 [workspace.package]
@@ -14,12 +13,13 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.82"
 license = "MIT"
+repository = "https://github.com/jost/macos-usb-tether-android"
 
 [workspace.dependencies]
-rndis-tether-usb = { path = "crates/usb" }
-rndis-tether-rndis = { path = "crates/rndis" }
-rndis-tether-netstack = { path = "crates/netstack" }
-rndis-tether-tun = { path = "crates/tun" }
+muta-usb = { path = "crates/usb" }
+muta-rndis = { path = "crates/rndis" }
+muta-netstack = { path = "crates/netstack" }
+muta-tun = { path = "crates/tun" }
 
 anyhow = "1"
 thiserror = "2"

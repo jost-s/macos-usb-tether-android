@@ -16,7 +16,7 @@ use log::{info, warn};
 use system_configuration::dynamic_store::{SCDynamicStore, SCDynamicStoreBuilder};
 
 /// Service id under `State:/Network/Service/`, ours alone.
-const SERVICE_ID: &str = "rndis-tether";
+const SERVICE_ID: &str = "muta";
 
 pub struct Dns {
     store: SCDynamicStore,
@@ -35,7 +35,7 @@ impl Dns {
         if servers.is_empty() {
             bail!("no DNS servers in the lease");
         }
-        let Some(store) = SCDynamicStoreBuilder::new("rndis-tetherd").build() else {
+        let Some(store) = SCDynamicStoreBuilder::new("muta").build() else {
             bail!("could not open SCDynamicStore (is the daemon running as root?)");
         };
 

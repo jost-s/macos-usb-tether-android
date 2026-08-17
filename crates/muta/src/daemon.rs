@@ -1,7 +1,5 @@
-//! `rndis-tetherd` — brings up Android USB tethering over RNDIS.
-//!
-//! Runs as a resident daemon: it watches for the phone, holds the tunnel up
-//! while it is attached, and restores the system on unplug.
+//! The resident daemon: watch for the phone, hold the tunnel up while it is
+//! attached, restore the system on unplug.
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -9,20 +7,14 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use log::{error, info, warn};
-use rndis_tether_netstack::MacAddr;
-use rndis_tether_rndis::HOST_MAX_TRANSFER_SIZE;
-use rndis_tether_usb::{DefaultBackend, UsbBackend};
+use muta_netstack::MacAddr;
+use muta_rndis::HOST_MAX_TRANSFER_SIZE;
+use muta_usb::{DefaultBackend, UsbBackend};
 
-mod device;
-mod link;
-mod signals;
-mod status;
-mod transport;
-mod tunnel;
-
-use link::{Link, LinkEvent, SwitchableSink, TxLimits};
-use status::{Status, StatusServer};
-use tunnel::Tunnel;
+use crate::link::{self, Link, LinkEvent, SwitchableSink, TxLimits};
+use crate::status::{Status, StatusServer};
+use crate::tunnel::Tunnel;
+use crate::{device, signals};
 
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(10);
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -32,32 +24,14 @@ const RETRY_DELAY: Duration = Duration::from_secs(2);
 /// How long to block waiting for a hotplug event between scans.
 const HOTPLUG_WAIT: Duration = Duration::from_secs(2);
 
-fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().collect();
-    let verbose = args.iter().any(|a| a == "-v" || a == "--verbose");
-    // nusb logs every transfer; keep it out of our own output.
-    let default = if verbose {
-        "debug,nusb=info"
-    } else {
-        "info,nusb=warn"
-    };
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default))
-        .format_timestamp_millis()
-        .init();
-
+/// Run until interrupted. Returns once a shutdown signal has been handled.
+pub fn run() -> Result<()> {
     signals::install();
-
-    // utun, routes and DNS all need root; fail here rather than after a
-    // successful RNDIS bring-up.
-    // SAFETY: geteuid cannot fail.
-    if unsafe { libc::geteuid() } != 0 {
-        anyhow::bail!("rndis-tetherd must run as root (try: sudo rndis-tetherd)");
-    }
 
     let backend = DefaultBackend::default();
     let status = match StatusServer::start() {
         Ok(s) => Some(s),
-        // Losing the ctl socket is not worth refusing to tether over.
+        // Losing the status socket is not worth refusing to tether over.
         Err(e) => {
             warn!("status socket unavailable: {e}");
             None
@@ -98,7 +72,7 @@ fn main() -> Result<()> {
 }
 
 /// Block until something is plugged in, or the wait elapses.
-fn wait_for_attach(watch: &mut Option<Box<dyn rndis_tether_usb::HotplugWatch>>) {
+fn wait_for_attach(watch: &mut Option<Box<dyn muta_usb::HotplugWatch>>) {
     match watch {
         Some(w) => {
             w.next_event(HOTPLUG_WAIT);
@@ -110,8 +84,8 @@ fn wait_for_attach(watch: &mut Option<Box<dyn rndis_tether_usb::HotplugWatch>>) 
 /// Hold one phone's tunnel up until it fails, detaches, or we are asked to stop.
 fn run_session(
     backend: &DefaultBackend,
-    info: rndis_tether_usb::DeviceInfo,
-    function: rndis_tether_usb::RndisFunction,
+    info: muta_usb::DeviceInfo,
+    function: muta_usb::RndisFunction,
     status: Option<&StatusServer>,
 ) -> Result<()> {
     info!("found {}", info.label());

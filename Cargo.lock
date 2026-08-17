@@ -351,6 +351,59 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
+name = "muta"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "env_logger",
+ "libc",
+ "log",
+ "muta-netstack",
+ "muta-rndis",
+ "muta-tun",
+ "muta-usb",
+]
+
+[[package]]
+name = "muta-netstack"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "thiserror",
+]
+
+[[package]]
+name = "muta-rndis"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "thiserror",
+]
+
+[[package]]
+name = "muta-tun"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "core-foundation",
+ "libc",
+ "log",
+ "system-configuration",
+]
+
+[[package]]
+name = "muta-usb"
+version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "futures-lite",
+ "log",
+ "nusb",
+ "rusb",
+ "thiserror",
+]
+
+[[package]]
 name = "nusb"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -463,66 +516,6 @@ name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
-
-[[package]]
-name = "rndis-tether-ctl"
-version = "0.1.0"
-dependencies = [
- "anyhow",
-]
-
-[[package]]
-name = "rndis-tether-daemon"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "env_logger",
- "libc",
- "log",
- "rndis-tether-netstack",
- "rndis-tether-rndis",
- "rndis-tether-tun",
- "rndis-tether-usb",
-]
-
-[[package]]
-name = "rndis-tether-netstack"
-version = "0.1.0"
-dependencies = [
- "log",
- "thiserror",
-]
-
-[[package]]
-name = "rndis-tether-rndis"
-version = "0.1.0"
-dependencies = [
- "log",
- "thiserror",
-]
-
-[[package]]
-name = "rndis-tether-tun"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "core-foundation",
- "libc",
- "log",
- "system-configuration",
-]
-
-[[package]]
-name = "rndis-tether-usb"
-version = "0.1.0"
-dependencies = [
- "env_logger",
- "futures-lite",
- "log",
- "nusb",
- "rusb",
- "thiserror",
-]
 
 [[package]]
 name = "rusb"

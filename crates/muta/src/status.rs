@@ -1,7 +1,8 @@
-//! Status shared with `rndis-tetherctl` over a unix socket.
+//! Status over a unix socket, served by `muta run` and read by `muta status`.
 //!
-//! One line of tab-separated `key=value` pairs. Tabs rather than spaces
-//! because values (the device name) contain spaces.
+//! One line of tab-separated `key=value` pairs. Tabs rather than spaces because
+//! values — the device name — contain spaces. Both ends live here so the format
+//! cannot drift.
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::Ipv4Addr;
@@ -14,7 +15,7 @@ use std::thread::JoinHandle;
 use anyhow::{Context, Result};
 use log::{debug, warn};
 
-pub const SOCKET_PATH: &str = "/var/run/rndis-tether.sock";
+pub const SOCKET_PATH: &str = "/var/run/muta.sock";
 
 #[derive(Clone, Debug, Default)]
 pub struct Status {
@@ -66,7 +67,7 @@ impl StatusServer {
             UnixListener::bind(SOCKET_PATH).with_context(|| format!("binding {SOCKET_PATH}"))?;
         listener.set_nonblocking(true)?;
         // The daemon is root, so the socket would otherwise be unreachable by
-        // the user running `rndis-tetherctl`. It only serves status, and any
+        // the user running `muta status`. It only serves status, and any
         // future mutating command must gate on the peer's uid instead.
         std::fs::set_permissions(SOCKET_PATH, std::fs::Permissions::from_mode(0o666))
             .with_context(|| format!("relaxing permissions on {SOCKET_PATH}"))?;
@@ -132,6 +133,35 @@ fn handle(mut stream: UnixStream, status: &Status) -> Result<()> {
     let _ = reader.read_line(&mut line);
     stream.write_all(status.encode().as_bytes())?;
     Ok(())
+}
+
+/// Ask a running daemon for its status and print it. Deliberately usable
+/// without root.
+pub fn print_status() -> Result<()> {
+    let reply = match query() {
+        Ok(reply) => reply,
+        Err(e) => {
+            eprintln!("muta: cannot reach the service ({e})");
+            eprintln!("is it running? try `sudo muta run` or `sudo muta install`");
+            std::process::exit(1);
+        }
+    };
+
+    for field in reply.trim_end().split('\t') {
+        match field.split_once('=') {
+            Some((key, value)) => println!("{key:<10} {value}"),
+            None => println!("{field}"),
+        }
+    }
+    Ok(())
+}
+
+fn query() -> Result<String> {
+    let mut stream = UnixStream::connect(SOCKET_PATH)?;
+    writeln!(stream, "status")?;
+    let mut reply = String::new();
+    BufReader::new(stream).read_line(&mut reply)?;
+    Ok(reply)
 }
 
 #[cfg(test)]
