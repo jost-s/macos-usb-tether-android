@@ -1,0 +1,421 @@
+//! The L2 shim in motion: threads that move frames between the RNDIS
+//! endpoints, ARP, DHCP, and the IP sink.
+
+use std::net::Ipv4Addr;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
+
+use log::{debug, error, info, trace, warn};
+use rndis_tether_netstack::dhcp::{self, DhcpClient, Event as DhcpEvent, Lease};
+use rndis_tether_netstack::ethernet::{self, MacAddr, ETHERTYPE_ARP, ETHERTYPE_IPV4};
+use rndis_tether_netstack::ipv4::{self, UdpDatagram};
+use rndis_tether_netstack::Arp;
+use rndis_tether_rndis::packet;
+use rndis_tether_usb::{InEndpoint, OutEndpoint};
+
+/// Reads kept queued on the bulk IN endpoint to cover USB round-trip latency.
+const RX_DEPTH: usize = 8;
+/// Cap on writes in flight before the TX thread waits for a completion.
+const TX_DEPTH: usize = 8;
+/// How long threads block before re-checking the shutdown flag.
+const TICK: Duration = Duration::from_millis(200);
+/// DHCP retransmit backoff, capped.
+const DHCP_RETRY_MIN: Duration = Duration::from_secs(1);
+const DHCP_RETRY_MAX: Duration = Duration::from_secs(16);
+
+/// Where inbound IP packets go. Replaced by the utun writer once it exists.
+pub trait IpSink: Send + Sync {
+    fn deliver(&self, packet: &[u8]);
+}
+
+/// Counts packets and drops them; used before utun is up.
+#[derive(Default)]
+pub struct NullSink {
+    pub packets: AtomicU64,
+}
+
+impl IpSink for NullSink {
+    fn deliver(&self, _packet: &[u8]) {
+        self.packets.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+#[derive(Debug)]
+pub enum LinkEvent {
+    Bound(Box<Lease>),
+    /// The link failed; the daemon should tear down and wait for a re-attach.
+    Failed(String),
+}
+
+/// Queue of Ethernet frames waiting for the bulk OUT endpoint.
+#[derive(Clone)]
+pub struct FrameSender(Sender<Vec<u8>>);
+
+impl FrameSender {
+    pub fn send(&self, frame: Vec<u8>) {
+        // A closed channel means the link is being torn down.
+        let _ = self.0.send(frame);
+    }
+}
+
+pub struct Link {
+    pub host_mac: MacAddr,
+    pub peer_mac: MacAddr,
+    pub arp: Arc<Mutex<Arp>>,
+    pub tx: FrameSender,
+    pub events: Receiver<LinkEvent>,
+    shutdown: Arc<AtomicBool>,
+    threads: Vec<JoinHandle<()>>,
+}
+
+impl Link {
+    /// Start the RX and TX threads and begin DHCP.
+    pub fn start(
+        bulk_in: Box<dyn InEndpoint>,
+        bulk_out: Box<dyn OutEndpoint>,
+        peer_mac: MacAddr,
+        device_max_transfer_size: u32,
+        rx_transfer_size: u32,
+        sink: Arc<dyn IpSink>,
+    ) -> Self {
+        let host_mac = ethernet::host_mac_for(peer_mac);
+        info!("host MAC {host_mac} on the RNDIS link");
+
+        let arp = Arc::new(Mutex::new(Arp::new(host_mac, Ipv4Addr::UNSPECIFIED)));
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let (frame_tx, frame_rx) = mpsc::channel();
+        let (event_tx, event_rx) = mpsc::channel();
+        let tx = FrameSender(frame_tx);
+
+        let mut threads = Vec::new();
+        threads.push(spawn(
+            "rndis-tx",
+            tx_loop(bulk_out, frame_rx, device_max_transfer_size, shutdown.clone()),
+        ));
+        threads.push(spawn(
+            "rndis-rx",
+            rx_loop(
+                bulk_in,
+                rx_transfer_size,
+                RxContext {
+                    host_mac,
+                    peer_mac,
+                    arp: arp.clone(),
+                    tx: tx.clone(),
+                    sink,
+                    events: event_tx,
+                },
+                shutdown.clone(),
+            ),
+        ));
+
+        Self {
+            host_mac,
+            peer_mac,
+            arp,
+            tx,
+            events: event_rx,
+            shutdown,
+            threads,
+        }
+    }
+
+    /// Resolve the gateway's MAC, asking for it if needed. `None` means the
+    /// caller should retry after the reply arrives.
+    pub fn gateway_mac(&self, gateway: Ipv4Addr) -> Option<MacAddr> {
+        let mut arp = self.arp.lock().expect("ARP lock");
+        if let Some(mac) = arp.lookup(gateway) {
+            return Some(mac);
+        }
+        if let Some(request) = arp.request(gateway) {
+            self.tx.send(request);
+        }
+        None
+    }
+
+    pub fn set_host_ip(&self, ip: Ipv4Addr) {
+        self.arp.lock().expect("ARP lock").set_host_ip(ip);
+    }
+
+    /// Wrap an IP packet from utun for the RNDIS side.
+    pub fn frame_ip(&self, gateway_mac: MacAddr, packet: &[u8]) -> Vec<u8> {
+        ethernet::build(gateway_mac, self.host_mac, ETHERTYPE_IPV4, packet)
+    }
+
+    pub fn shutdown(self) {
+        self.shutdown.store(true, Ordering::Relaxed);
+        drop(self.tx);
+        for t in self.threads {
+            let _ = t.join();
+        }
+    }
+}
+
+fn spawn(name: &str, body: impl FnOnce() + Send + 'static) -> JoinHandle<()> {
+    std::thread::Builder::new()
+        .name(name.to_string())
+        .spawn(body)
+        .expect("spawning a link thread")
+}
+
+fn tx_loop(
+    mut bulk_out: Box<dyn OutEndpoint>,
+    frames: Receiver<Vec<u8>>,
+    max_transfer_size: u32,
+    shutdown: Arc<AtomicBool>,
+) -> impl FnOnce() {
+    move || {
+        let max_packet = bulk_out.max_packet_size().max(1);
+        while !shutdown.load(Ordering::Relaxed) {
+            let frame = match frames.recv_timeout(TICK) {
+                Ok(f) => f,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    reap(bulk_out.as_mut(), Duration::ZERO);
+                    continue;
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            };
+
+            let mut msg = packet::encode(&frame);
+            if msg.len() > max_transfer_size as usize {
+                warn!("dropping a {}-byte frame: over the device limit", frame.len());
+                continue;
+            }
+            // A transfer that is an exact multiple of the packet size would
+            // need a zero-length packet to terminate; one padding byte past
+            // msg_len is cheaper and the device ignores it.
+            if msg.len() % max_packet == 0 {
+                msg.push(0);
+            }
+
+            // Bound the queue so a stalled endpoint cannot grow it without limit.
+            while bulk_out.pending() >= TX_DEPTH {
+                if bulk_out.wait(TICK).is_none() && shutdown.load(Ordering::Relaxed) {
+                    return;
+                }
+            }
+            bulk_out.submit(msg);
+            reap(bulk_out.as_mut(), Duration::ZERO);
+        }
+
+        // Let anything already queued finish before the endpoint is dropped.
+        reap(bulk_out.as_mut(), Duration::from_millis(500));
+    }
+}
+
+fn reap(bulk_out: &mut dyn OutEndpoint, timeout: Duration) {
+    while bulk_out.pending() > 0 {
+        match bulk_out.wait(timeout) {
+            Some(Ok(())) => {}
+            Some(Err(e)) => {
+                debug!("bulk OUT transfer failed: {e}");
+                break;
+            }
+            None => break,
+        }
+    }
+}
+
+struct RxContext {
+    host_mac: MacAddr,
+    peer_mac: MacAddr,
+    arp: Arc<Mutex<Arp>>,
+    tx: FrameSender,
+    sink: Arc<dyn IpSink>,
+    events: Sender<LinkEvent>,
+}
+
+fn rx_loop(
+    mut bulk_in: Box<dyn InEndpoint>,
+    transfer_size: u32,
+    ctx: RxContext,
+    shutdown: Arc<AtomicBool>,
+) -> impl FnOnce() {
+    move || {
+        for _ in 0..RX_DEPTH {
+            bulk_in.submit(transfer_size as usize);
+        }
+
+        // The host MAC is stable, so seed DHCP's transaction id from it.
+        let mut dhcp = DhcpClient::new(
+            ctx.host_mac,
+            u32::from_be_bytes([
+                ctx.host_mac.0[2],
+                ctx.host_mac.0[3],
+                ctx.host_mac.0[4],
+                ctx.host_mac.0[5],
+            ]),
+        );
+        let mut dhcp_state = DhcpTimer::new();
+        send_dhcp(&ctx, &mut dhcp.discover());
+
+        while !shutdown.load(Ordering::Relaxed) {
+            match bulk_in.wait(TICK) {
+                Some(Ok(data)) => {
+                    bulk_in.submit(transfer_size as usize);
+                    handle_transfer(&ctx, &mut dhcp, &mut dhcp_state, &data);
+                }
+                Some(Err(e)) => {
+                    bulk_in.submit(transfer_size as usize);
+                    if e.is_fatal() {
+                        let _ = ctx.events.send(LinkEvent::Failed(e.to_string()));
+                        return;
+                    }
+                    debug!("bulk IN transfer failed: {e}");
+                }
+                None => {}
+            }
+
+            if let Some(msg) = dhcp_state.due(&mut dhcp) {
+                send_dhcp(&ctx, &msg);
+            }
+        }
+    }
+}
+
+/// Retransmit backoff for whatever DHCP is currently waiting on.
+struct DhcpTimer {
+    next: Instant,
+    backoff: Duration,
+    renew_at: Option<Instant>,
+}
+
+impl DhcpTimer {
+    fn new() -> Self {
+        Self {
+            next: Instant::now() + DHCP_RETRY_MIN,
+            backoff: DHCP_RETRY_MIN,
+            renew_at: None,
+        }
+    }
+
+    fn bound(&mut self, lease: &Lease) {
+        self.backoff = DHCP_RETRY_MIN;
+        self.renew_at = Some(Instant::now() + lease.renewal_time);
+        self.next = self.renew_at.unwrap();
+    }
+
+    fn restart(&mut self) {
+        self.backoff = DHCP_RETRY_MIN;
+        self.next = Instant::now();
+        self.renew_at = None;
+    }
+
+    /// The next message to send, if a timer has expired.
+    fn due(&mut self, dhcp: &mut DhcpClient) -> Option<Vec<u8>> {
+        if Instant::now() < self.next {
+            return None;
+        }
+
+        if self.renew_at.is_some() {
+            self.renew_at = None;
+            self.next = Instant::now() + DHCP_RETRY_MIN;
+            self.backoff = DHCP_RETRY_MIN;
+            return dhcp.renew();
+        }
+
+        self.backoff = (self.backoff * 2).min(DHCP_RETRY_MAX);
+        self.next = Instant::now() + self.backoff;
+        // Nothing pending means the previous attempt was abandoned; start over.
+        Some(dhcp.retransmit().unwrap_or_else(|| dhcp.discover()))
+    }
+}
+
+/// Wrap a DHCP message in UDP/IP/Ethernet and queue it.
+fn send_dhcp(ctx: &RxContext, msg: &[u8]) {
+    let datagram = UdpDatagram {
+        src_ip: Ipv4Addr::UNSPECIFIED,
+        dst_ip: Ipv4Addr::BROADCAST,
+        src_port: dhcp::CLIENT_PORT,
+        dst_port: dhcp::SERVER_PORT,
+        payload: msg,
+    };
+    let ip = ipv4::build_udp(&datagram, 0);
+    ctx.tx.send(ethernet::build(
+        MacAddr::BROADCAST,
+        ctx.host_mac,
+        ETHERTYPE_IPV4,
+        &ip,
+    ));
+}
+
+fn handle_transfer(
+    ctx: &RxContext,
+    dhcp: &mut DhcpClient,
+    timer: &mut DhcpTimer,
+    data: &[u8],
+) {
+    for result in packet::decode(data) {
+        let frame_bytes = match result {
+            Ok(f) => f,
+            Err(e) => {
+                warn!("malformed RNDIS packet: {e}");
+                return;
+            }
+        };
+        let frame = match ethernet::parse(frame_bytes) {
+            Ok(f) => f,
+            Err(e) => {
+                trace!("malformed Ethernet frame: {e}");
+                continue;
+            }
+        };
+        // Our own MAC is synthesized, so anything not addressed to us or to
+        // broadcast is the phone talking to someone else.
+        if frame.dst != ctx.host_mac && !frame.dst.is_multicast() {
+            continue;
+        }
+
+        match frame.ethertype {
+            ETHERTYPE_ARP => match ctx.arp.lock().expect("ARP lock").handle(frame.payload) {
+                Ok(Some(reply)) => ctx.tx.send(reply),
+                Ok(None) => {}
+                Err(e) => trace!("bad ARP packet: {e}"),
+            },
+            ETHERTYPE_IPV4 => handle_ipv4(ctx, dhcp, timer, frame.payload),
+            other => trace!("ignoring ethertype 0x{other:04x}"),
+        }
+    }
+}
+
+fn handle_ipv4(ctx: &RxContext, dhcp: &mut DhcpClient, timer: &mut DhcpTimer, payload: &[u8]) {
+    // DHCP replies are ours to consume; everything else goes to the tunnel.
+    if let Ok(d) = ipv4::parse_udp(payload) {
+        if d.dst_port == dhcp::CLIENT_PORT && d.src_port == dhcp::SERVER_PORT {
+            match dhcp.handle(d.payload) {
+                Ok(DhcpEvent::Send(msg)) => send_dhcp(ctx, &msg),
+                Ok(DhcpEvent::Bound(lease)) => {
+                    timer.bound(&lease);
+                    ctx.arp.lock().expect("ARP lock").set_host_ip(lease.ip);
+                    // The server is the gateway; remember where the reply came from.
+                    ctx.arp
+                        .lock()
+                        .expect("ARP lock")
+                        .insert(d.src_ip, ctx.peer_mac);
+                    let _ = ctx.events.send(LinkEvent::Bound(lease));
+                }
+                Ok(DhcpEvent::Nak) => timer.restart(),
+                Ok(DhcpEvent::Ignored) => {}
+                Err(e) => debug!("bad DHCP message: {e}"),
+            }
+            return;
+        }
+    }
+
+    ctx.sink.deliver(payload);
+}
+
+/// Non-blocking drain of link events.
+pub fn try_next_event(events: &Receiver<LinkEvent>) -> Option<LinkEvent> {
+    match events.try_recv() {
+        Ok(e) => Some(e),
+        Err(TryRecvError::Empty) => None,
+        Err(TryRecvError::Disconnected) => {
+            error!("link event channel closed");
+            None
+        }
+    }
+}

@@ -471,6 +471,7 @@ dependencies = [
  "anyhow",
  "env_logger",
  "log",
+ "rndis-tether-netstack",
  "rndis-tether-rndis",
  "rndis-tether-usb",
 ]
