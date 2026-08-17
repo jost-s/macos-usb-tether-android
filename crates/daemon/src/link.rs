@@ -109,26 +109,32 @@ impl Link {
         let (event_tx, event_rx) = mpsc::channel();
         let tx = FrameSender(frame_tx);
 
-        let mut threads = Vec::new();
-        threads.push(spawn(
-            "rndis-tx",
-            tx_loop(bulk_out, frame_rx, device_max_transfer_size, shutdown.clone()),
-        ));
-        threads.push(spawn(
-            "rndis-rx",
-            rx_loop(
-                bulk_in,
-                rx_transfer_size,
-                RxContext {
-                    host_mac,
-                    arp: arp.clone(),
-                    tx: tx.clone(),
-                    sink,
-                    events: event_tx,
-                },
-                shutdown.clone(),
+        let threads = vec![
+            spawn(
+                "rndis-tx",
+                tx_loop(
+                    bulk_out,
+                    frame_rx,
+                    device_max_transfer_size,
+                    shutdown.clone(),
+                ),
             ),
-        ));
+            spawn(
+                "rndis-rx",
+                rx_loop(
+                    bulk_in,
+                    rx_transfer_size,
+                    RxContext {
+                        host_mac,
+                        arp: arp.clone(),
+                        tx: tx.clone(),
+                        sink,
+                        events: event_tx,
+                    },
+                    shutdown.clone(),
+                ),
+            ),
+        ];
 
         Self {
             host_mac,
@@ -176,7 +182,10 @@ fn tx_loop(
 
             let mut msg = packet::encode(&frame);
             if msg.len() > max_transfer_size as usize {
-                warn!("dropping a {}-byte frame: over the device limit", frame.len());
+                warn!(
+                    "dropping a {}-byte frame: over the device limit",
+                    frame.len()
+                );
                 continue;
             }
             // A transfer that is an exact multiple of the packet size would
@@ -244,7 +253,7 @@ fn rx_loop(
             ]),
         );
         let mut dhcp_state = DhcpTimer::new();
-        send_dhcp(&ctx, &mut dhcp.discover());
+        send_dhcp(&ctx, &dhcp.discover());
 
         while !shutdown.load(Ordering::Relaxed) {
             match bulk_in.wait(TICK) {
@@ -336,12 +345,7 @@ fn send_dhcp(ctx: &RxContext, msg: &[u8]) {
     ));
 }
 
-fn handle_transfer(
-    ctx: &RxContext,
-    dhcp: &mut DhcpClient,
-    timer: &mut DhcpTimer,
-    data: &[u8],
-) {
+fn handle_transfer(ctx: &RxContext, dhcp: &mut DhcpClient, timer: &mut DhcpTimer, data: &[u8]) {
     for result in packet::decode(data) {
         let frame_bytes = match result {
             Ok(f) => f,

@@ -307,8 +307,8 @@ mod tests {
                 }
                 wire::MSG_QUERY => {
                     let oid = wire::u32_at(msg, 12).unwrap();
-                    let fail = self.fail_permanent_address
-                        && oid == wire::OID_802_3_PERMANENT_ADDRESS;
+                    let fail =
+                        self.fail_permanent_address && oid == wire::OID_802_3_PERMANENT_ADDRESS;
                     let mut r = Vec::new();
                     if fail {
                         for v in [wire::MSG_QUERY_C, 24, id, 0xC000_0001, 0, 0] {
@@ -386,7 +386,10 @@ mod tests {
 
         // The SET must be the packet filter that brings the link up.
         let set = &rndis.transport_mut().sent[2];
-        assert_eq!(wire::u32_at(set, 12).unwrap(), wire::OID_GEN_CURRENT_PACKET_FILTER);
+        assert_eq!(
+            wire::u32_at(set, 12).unwrap(),
+            wire::OID_GEN_CURRENT_PACKET_FILTER
+        );
         assert_eq!(wire::u32_at(set, 28).unwrap(), wire::DEFAULT_PACKET_FILTER);
     }
 
@@ -403,7 +406,9 @@ mod tests {
     #[test]
     fn an_indicate_status_between_command_and_completion_is_handled() {
         let mut device = MockDevice::new([1, 2, 3, 4, 5, 6]);
-        device.preloaded.push_back(indicate(wire::STATUS_MEDIA_CONNECT));
+        device
+            .preloaded
+            .push_back(indicate(wire::STATUS_MEDIA_CONNECT));
         let mut rndis = Rndis::new(device);
 
         rndis.bring_up().unwrap();
@@ -422,12 +427,10 @@ mod tests {
 
         rndis.initialize().unwrap();
 
-        let answered = rndis
-            .transport_mut()
-            .sent
-            .iter()
-            .any(|m| wire::u32_at(m, 0).unwrap() == wire::MSG_KEEPALIVE_C
-                && wire::u32_at(m, 8).unwrap() == 0x4242);
+        let answered = rndis.transport_mut().sent.iter().any(|m| {
+            wire::u32_at(m, 0).unwrap() == wire::MSG_KEEPALIVE_C
+                && wire::u32_at(m, 8).unwrap() == 0x4242
+        });
         assert!(answered, "device keepalive must be acknowledged");
     }
 
@@ -451,7 +454,21 @@ mod tests {
             }
             fn receive(&mut self) -> Result<Vec<u8>> {
                 let mut r = Vec::new();
-                for v in [wire::MSG_INIT_C, 52, 1, 0xC000_0001, 1, 0, 0, 0, 1, 16384, 0, 0, 0] {
+                for v in [
+                    wire::MSG_INIT_C,
+                    52,
+                    1,
+                    0xC000_0001,
+                    1,
+                    0,
+                    0,
+                    0,
+                    1,
+                    16384,
+                    0,
+                    0,
+                    0,
+                ] {
                     r.extend_from_slice(&v.to_le_bytes());
                 }
                 Ok(r)

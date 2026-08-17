@@ -35,7 +35,6 @@ impl UsbBackend for NusbBackend {
         let info = list_nusb()?
             .into_iter()
             .find(|(_, i)| i.id == id)
-            .map(|(raw, i)| (raw, i))
             .ok_or(UsbError::NotFound)?;
 
         let device = info.0.open().wait().map_err(err)?;
@@ -144,7 +143,11 @@ impl UsbDevice for NusbDeviceHandle {
     }
 
     fn configurations(&self) -> Result<Vec<ConfigDescriptor>> {
-        Ok(self.device.configurations().map(config_descriptor).collect())
+        Ok(self
+            .device
+            .configurations()
+            .map(config_descriptor)
+            .collect())
     }
 
     fn active_configuration(&self) -> Result<u8> {
@@ -254,7 +257,11 @@ impl UsbInterface for NusbInterfaceHandle {
                     .endpoint::<Interrupt, In>(address)
                     .map_err(err)?,
             }),
-            other => return Err(UsbError::Other(format!("unsupported IN endpoint {other:?}"))),
+            other => {
+                return Err(UsbError::Other(format!(
+                    "unsupported IN endpoint {other:?}"
+                )))
+            }
         })
     }
 

@@ -30,12 +30,7 @@ fn run(program: &str, args: &[&str]) -> Result<String> {
 }
 
 /// Give the tunnel an address, with the phone's gateway as the peer.
-pub fn configure_interface(
-    interface: &str,
-    ip: Ipv4Addr,
-    peer: Ipv4Addr,
-    mtu: u16,
-) -> Result<()> {
+pub fn configure_interface(interface: &str, ip: Ipv4Addr, peer: Ipv4Addr, mtu: u16) -> Result<()> {
     run(
         IFCONFIG,
         &[
@@ -64,7 +59,12 @@ impl Routes {
     /// Take over routing with the VPN split-default trick: two halves of the
     /// address space beat the physical default without replacing it, so
     /// teardown is a clean delete rather than a restore.
-    pub fn install_default(interface: &str, gateway: Ipv4Addr, subnet: Ipv4Addr, prefix: u8) -> Result<Self> {
+    pub fn install_default(
+        interface: &str,
+        gateway: Ipv4Addr,
+        subnet: Ipv4Addr,
+        prefix: u8,
+    ) -> Result<Self> {
         let mut routes = Routes {
             destinations: Vec::new(),
         };
@@ -120,11 +120,17 @@ mod tests {
     #[test]
     fn computes_the_network_address() {
         assert_eq!(
-            subnet_of(Ipv4Addr::new(10, 71, 51, 112), Ipv4Addr::new(255, 255, 255, 0)),
+            subnet_of(
+                Ipv4Addr::new(10, 71, 51, 112),
+                Ipv4Addr::new(255, 255, 255, 0)
+            ),
             Ipv4Addr::new(10, 71, 51, 0)
         );
         assert_eq!(
-            subnet_of(Ipv4Addr::new(192, 168, 42, 130), Ipv4Addr::new(255, 255, 255, 192)),
+            subnet_of(
+                Ipv4Addr::new(192, 168, 42, 130),
+                Ipv4Addr::new(255, 255, 255, 192)
+            ),
             Ipv4Addr::new(192, 168, 42, 128)
         );
     }

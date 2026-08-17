@@ -64,7 +64,10 @@ impl Dns {
             entries.push(("DomainName", CFString::new(domain).as_CFType()));
             entries.push(("SearchDomains", array_of(&[domain.to_string()])));
         }
-        dns.set(&format!("State:/Network/Service/{SERVICE_ID}/DNS"), dict(&entries))?;
+        dns.set(
+            &format!("State:/Network/Service/{SERVICE_ID}/DNS"),
+            dict(&entries),
+        )?;
 
         info!("DNS via {servers:?} on {interface}");
         Ok(dns)
@@ -104,6 +107,5 @@ fn dict(entries: &[(&str, CFType)]) -> CFDictionary<CFString, CFType> {
 }
 
 fn array_of(values: &[String]) -> CFType {
-    CFArray::from_CFTypes(&values.iter().map(|v| CFString::new(v)).collect::<Vec<_>>())
-        .as_CFType()
+    CFArray::from_CFTypes(&values.iter().map(|v| CFString::new(v)).collect::<Vec<_>>()).as_CFType()
 }

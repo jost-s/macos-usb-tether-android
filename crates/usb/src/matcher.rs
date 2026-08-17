@@ -140,10 +140,25 @@ mod tests {
     /// Header + Call Management + ACM + Union(0, 1), as an Android gadget sends it.
     fn android_cdc_extra() -> Vec<u8> {
         vec![
-            0x05, CS_INTERFACE, 0x00, 0x10, 0x01, // Header
-            0x05, CS_INTERFACE, 0x01, 0x00, 0x01, // Call Management
-            0x04, CS_INTERFACE, 0x02, 0x00, // ACM
-            0x05, CS_INTERFACE, CDC_UNION, 0x00, 0x01, // Union: master 0, slave 1
+            0x05,
+            CS_INTERFACE,
+            0x00,
+            0x10,
+            0x01, // Header
+            0x05,
+            CS_INTERFACE,
+            0x01,
+            0x00,
+            0x01, // Call Management
+            0x04,
+            CS_INTERFACE,
+            0x02,
+            0x00, // ACM
+            0x05,
+            CS_INTERFACE,
+            CDC_UNION,
+            0x00,
+            0x01, // Union: master 0, slave 1
         ]
     }
 
@@ -284,9 +299,15 @@ mod tests {
 
     #[test]
     fn union_parser_rejects_malformed_lengths() {
-        assert_eq!(union_subordinate(&[0x00, CS_INTERFACE, CDC_UNION, 0, 1]), None);
+        assert_eq!(
+            union_subordinate(&[0x00, CS_INTERFACE, CDC_UNION, 0, 1]),
+            None
+        );
         // Length runs past the end of the buffer.
-        assert_eq!(union_subordinate(&[0x40, CS_INTERFACE, CDC_UNION, 0, 1]), None);
+        assert_eq!(
+            union_subordinate(&[0x40, CS_INTERFACE, CDC_UNION, 0, 1]),
+            None
+        );
         // Union descriptor truncated to 4 bytes has no subordinate field.
         assert_eq!(union_subordinate(&[0x04, CS_INTERFACE, CDC_UNION, 0]), None);
     }

@@ -37,8 +37,8 @@ pub const PACKET_TYPE_ALL_MULTICAST: u32 = 0x0000_0004;
 pub const PACKET_TYPE_BROADCAST: u32 = 0x0000_0008;
 pub const PACKET_TYPE_PROMISCUOUS: u32 = 0x0000_0020;
 
-/// Filter that brings the link up. Matches HoRNDIS; broader than Linux's
-/// default, which some Android builds need to forward our synthesized MAC.
+/// Filter that brings the link up. Matches HoRNDIS, which is broader than
+/// Linux's default.
 pub const DEFAULT_PACKET_FILTER: u32 = PACKET_TYPE_DIRECTED
     | PACKET_TYPE_MULTICAST
     | PACKET_TYPE_ALL_MULTICAST
@@ -237,7 +237,10 @@ mod tests {
         assert_eq!(u32_at(&m, 4).unwrap() as usize, m.len());
         let len = u32_at(&m, 16).unwrap() as usize;
         let offset = u32_at(&m, 20).unwrap() as usize;
-        assert_eq!(&m[OFFSET_BASE + offset..OFFSET_BASE + offset + len], &[0x2F, 0, 0, 0]);
+        assert_eq!(
+            &m[OFFSET_BASE + offset..OFFSET_BASE + offset + len],
+            &[0x2F, 0, 0, 0]
+        );
     }
 
     fn init_complete_bytes(alignment_exponent: u32) -> Vec<u8> {
@@ -280,7 +283,10 @@ mod tests {
     #[test]
     fn truncated_init_complete_is_rejected() {
         let short = init_complete_bytes(2)[..20].to_vec();
-        assert!(matches!(decode_init_complete(&short), Err(Error::Truncated)));
+        assert!(matches!(
+            decode_init_complete(&short),
+            Err(Error::Truncated)
+        ));
     }
 
     #[test]

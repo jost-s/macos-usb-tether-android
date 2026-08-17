@@ -11,7 +11,7 @@ use anyhow::Result;
 use log::{error, info, warn};
 use rndis_tether_netstack::MacAddr;
 use rndis_tether_rndis::HOST_MAX_TRANSFER_SIZE;
-use rndis_tether_usb::{NusbBackend, UsbBackend};
+use rndis_tether_usb::{DefaultBackend, UsbBackend};
 
 mod device;
 mod link;
@@ -47,7 +47,7 @@ fn main() -> Result<()> {
 
     signals::install();
 
-    let backend = NusbBackend::new();
+    let backend = DefaultBackend::default();
     // Without root there is no /var/run socket; the daemon still works for
     // read-only probing, so this is a warning rather than a failure.
     let status = match StatusServer::start() {
@@ -103,7 +103,7 @@ fn wait_for_attach(watch: &mut Option<Box<dyn rndis_tether_usb::HotplugWatch>>) 
 
 /// Hold one phone's tunnel up until it fails, detaches, or we are asked to stop.
 fn run_session(
-    backend: &NusbBackend,
+    backend: &DefaultBackend,
     info: rndis_tether_usb::DeviceInfo,
     function: rndis_tether_usb::RndisFunction,
     status: Option<&StatusServer>,

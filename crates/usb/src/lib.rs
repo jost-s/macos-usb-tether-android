@@ -6,6 +6,8 @@ pub mod descriptor;
 pub mod error;
 pub mod matcher;
 mod nusb_backend;
+#[cfg(feature = "libusb")]
+mod rusb_backend;
 
 pub use backend::{
     ControlSetup, ControlType, HotplugEvent, HotplugWatch, InEndpoint, OutEndpoint, Recipient,
@@ -18,10 +20,13 @@ pub use descriptor::{
 pub use error::{Result, UsbError};
 pub use matcher::{find_rndis, RndisFunction};
 pub use nusb_backend::NusbBackend;
+#[cfg(feature = "libusb")]
+pub use rusb_backend::RusbBackend;
 
 /// The backend the daemon uses. `--features libusb` swaps in rusb without any
 /// other code change.
 #[cfg(not(feature = "libusb"))]
-pub fn default_backend() -> impl UsbBackend {
-    NusbBackend::new()
-}
+pub type DefaultBackend = NusbBackend;
+
+#[cfg(feature = "libusb")]
+pub type DefaultBackend = RusbBackend;

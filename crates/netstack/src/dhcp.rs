@@ -135,12 +135,9 @@ impl DhcpClient {
     pub fn retransmit(&mut self) -> Option<Vec<u8>> {
         match self.state {
             State::Selecting => Some(self.build(DISCOVER, Ipv4Addr::UNSPECIFIED, None, None)),
-            State::Requesting => Some(self.build(
-                REQUEST,
-                Ipv4Addr::UNSPECIFIED,
-                self.offered,
-                self.server_id,
-            )),
+            State::Requesting => {
+                Some(self.build(REQUEST, Ipv4Addr::UNSPECIFIED, self.offered, self.server_id))
+            }
             State::Renewing => {
                 let ip = self.lease.as_ref()?.ip;
                 Some(self.build(REQUEST, ip, None, None))
@@ -212,10 +209,7 @@ impl DhcpClient {
         if p.yiaddr.is_unspecified() {
             return Err(Error::Malformed("ACK without an address"));
         }
-        let server_id = p
-            .server_id
-            .or(self.server_id)
-            .unwrap_or(p.siaddr);
+        let server_id = p.server_id.or(self.server_id).unwrap_or(p.siaddr);
         // Android's tether server is also the gateway; fall back to it when the
         // router option is missing.
         let router = p.router.or(if server_id.is_unspecified() {
@@ -253,8 +247,8 @@ impl DhcpClient {
         m.push(0); // hops
         m.extend_from_slice(&self.xid.to_be_bytes());
         m.extend_from_slice(&0u16.to_be_bytes()); // secs
-        // Ask for broadcast replies: we have no address to receive unicast at
-        // until the lease is bound.
+                                                  // Ask for broadcast replies: we have no address to receive unicast at
+                                                  // until the lease is bound.
         let flags = if ciaddr.is_unspecified() {
             FLAG_BROADCAST
         } else {
@@ -394,9 +388,7 @@ fn parse(buf: &[u8]) -> Result<Parsed> {
                     .map(|s| s.trim_end_matches('\0').to_string())
                     .filter(|s| !s.is_empty())
             }
-            OPT_INTERFACE_MTU if len >= 2 => {
-                p.mtu = Some(u16::from_be_bytes([data[0], data[1]]))
-            }
+            OPT_INTERFACE_MTU if len >= 2 => p.mtu = Some(u16::from_be_bytes([data[0], data[1]])),
             OPT_LEASE_TIME if len >= 4 => p.lease_time = Some(seconds(data)),
             OPT_RENEWAL_TIME if len >= 4 => p.renewal_time = Some(seconds(data)),
             _ => {}
@@ -426,7 +418,12 @@ mod tests {
     const OFFERED: Ipv4Addr = Ipv4Addr::new(192, 168, 42, 130);
 
     /// A reply as Android's tether server sends it.
-    fn server_reply(xid: u32, message_type: u8, yiaddr: Ipv4Addr, options: &[(u8, Vec<u8>)]) -> Vec<u8> {
+    fn server_reply(
+        xid: u32,
+        message_type: u8,
+        yiaddr: Ipv4Addr,
+        options: &[(u8, Vec<u8>)],
+    ) -> Vec<u8> {
         let mut m = vec![OP_REPLY, HTYPE_ETHERNET, 6, 0];
         m.extend_from_slice(&xid.to_be_bytes());
         m.extend_from_slice(&[0; 4]); // secs, flags
@@ -511,7 +508,10 @@ mod tests {
         assert_eq!(lease.ip, OFFERED);
         assert_eq!(lease.netmask, Ipv4Addr::new(255, 255, 255, 0));
         assert_eq!(lease.router, Some(SERVER));
-        assert_eq!(lease.dns, vec![Ipv4Addr::new(8, 8, 8, 8), Ipv4Addr::new(1, 1, 1, 1)]);
+        assert_eq!(
+            lease.dns,
+            vec![Ipv4Addr::new(8, 8, 8, 8), Ipv4Addr::new(1, 1, 1, 1)]
+        );
         assert_eq!(lease.domain.as_deref(), Some("lan"));
         assert_eq!(lease.mtu, Some(1500));
         assert_eq!(lease.lease_time, Duration::from_secs(3600));
@@ -538,15 +538,24 @@ mod tests {
         let Event::Send(request) = c.handle(&full_offer(xid, OFFER)).unwrap() else {
             panic!("expected a REQUEST");
         };
-        assert_eq!(option(&request, OPT_REQUESTED_IP), Some(OFFERED.octets().to_vec()));
-        assert_eq!(option(&request, OPT_SERVER_ID), Some(SERVER.octets().to_vec()));
+        assert_eq!(
+            option(&request, OPT_REQUESTED_IP),
+            Some(OFFERED.octets().to_vec())
+        );
+        assert_eq!(
+            option(&request, OPT_SERVER_ID),
+            Some(SERVER.octets().to_vec())
+        );
     }
 
     #[test]
     fn ignores_replies_for_another_transaction() {
         let mut c = DhcpClient::new(MAC, 0x1234);
         let xid = xid_of(&c.discover());
-        assert_eq!(c.handle(&full_offer(xid ^ 0xFFFF, OFFER)).unwrap(), Event::Ignored);
+        assert_eq!(
+            c.handle(&full_offer(xid ^ 0xFFFF, OFFER)).unwrap(),
+            Event::Ignored
+        );
         assert_eq!(c.state(), State::Selecting);
     }
 
@@ -564,7 +573,11 @@ mod tests {
         let (mut c, _) = bind();
         c.renew().unwrap();
         let xid = c.xid;
-        assert_eq!(c.handle(&server_reply(xid, NAK, Ipv4Addr::UNSPECIFIED, &[])).unwrap(), Event::Nak);
+        assert_eq!(
+            c.handle(&server_reply(xid, NAK, Ipv4Addr::UNSPECIFIED, &[]))
+                .unwrap(),
+            Event::Nak
+        );
         assert_eq!(c.state(), State::Init);
         assert!(c.lease().is_none());
     }
@@ -578,7 +591,10 @@ mod tests {
         assert_eq!(&renew[12..16], &OFFERED.octets());
 
         let xid = c.xid;
-        assert!(matches!(c.handle(&full_offer(xid, ACK)).unwrap(), Event::Bound(_)));
+        assert!(matches!(
+            c.handle(&full_offer(xid, ACK)).unwrap(),
+            Event::Bound(_)
+        ));
         assert_eq!(c.state(), State::Bound);
     }
 
@@ -608,7 +624,12 @@ mod tests {
         let mut c = DhcpClient::new(MAC, 0x1234);
         let xid = xid_of(&c.discover());
         c.handle(&full_offer(xid, OFFER)).unwrap();
-        let bad = server_reply(xid, ACK, Ipv4Addr::UNSPECIFIED, &[(OPT_SERVER_ID, SERVER.octets().to_vec())]);
+        let bad = server_reply(
+            xid,
+            ACK,
+            Ipv4Addr::UNSPECIFIED,
+            &[(OPT_SERVER_ID, SERVER.octets().to_vec())],
+        );
         assert!(matches!(c.handle(&bad), Err(Error::Malformed(_))));
     }
 
@@ -670,10 +691,16 @@ mod tests {
         assert!(c.retransmit().is_none(), "nothing pending in Init");
 
         let xid = xid_of(&c.discover());
-        assert_eq!(option(&c.retransmit().unwrap(), OPT_MESSAGE_TYPE), Some(vec![DISCOVER]));
+        assert_eq!(
+            option(&c.retransmit().unwrap(), OPT_MESSAGE_TYPE),
+            Some(vec![DISCOVER])
+        );
 
         c.handle(&full_offer(xid, OFFER)).unwrap();
-        assert_eq!(option(&c.retransmit().unwrap(), OPT_MESSAGE_TYPE), Some(vec![REQUEST]));
+        assert_eq!(
+            option(&c.retransmit().unwrap(), OPT_MESSAGE_TYPE),
+            Some(vec![REQUEST])
+        );
 
         c.handle(&full_offer(xid, ACK)).unwrap();
         assert!(c.retransmit().is_none(), "nothing to retransmit once bound");

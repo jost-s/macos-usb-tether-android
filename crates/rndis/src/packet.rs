@@ -184,7 +184,10 @@ mod tests {
         let f = frame(64);
         let pad = 8;
         let mut buf = encode(&f);
-        buf.splice(DATA_HEADER_LEN..DATA_HEADER_LEN, std::iter::repeat_n(0u8, pad));
+        buf.splice(
+            DATA_HEADER_LEN..DATA_HEADER_LEN,
+            std::iter::repeat_n(0u8, pad),
+        );
         let new_len = (buf.len()) as u32;
         buf[4..8].copy_from_slice(&new_len.to_le_bytes());
         buf[8..12].copy_from_slice(&((DATA_HEADER_LEN - OFFSET_BASE + pad) as u32).to_le_bytes());

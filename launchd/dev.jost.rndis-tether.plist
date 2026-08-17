@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>dev.jost.rndis-tether</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/rndis-tetherd</string>
+    </array>
+
+    <!-- Resident: the daemon watches for hotplug itself. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/var/log/rndis-tether.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/rndis-tether.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

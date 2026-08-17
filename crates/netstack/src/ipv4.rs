@@ -93,7 +93,11 @@ pub fn build_udp(d: &UdpDatagram, ip_id: u16) -> Vec<u8> {
     ];
     let udp_checksum = checksum(&[&pseudo, &p[IPV4_HEADER_LEN..]]);
     // All-zeroes means "no checksum"; RFC 768 sends the equivalent 0xFFFF instead.
-    let udp_checksum = if udp_checksum == 0 { 0xFFFF } else { udp_checksum };
+    let udp_checksum = if udp_checksum == 0 {
+        0xFFFF
+    } else {
+        udp_checksum
+    };
     p[IPV4_HEADER_LEN + 6..IPV4_HEADER_LEN + 8].copy_from_slice(&udp_checksum.to_be_bytes());
 
     p
@@ -181,7 +185,20 @@ mod tests {
     fn odd_length_payload_checksums_the_same_as_a_flat_buffer() {
         let packet = build_udp(&datagram(&[1, 2, 3, 4, 5]), 1);
         let udp = &packet[20..];
-        let pseudo = [0, 0, 0, 0, 255, 255, 255, 255, 0, PROTO_UDP, 0, udp.len() as u8];
+        let pseudo = [
+            0,
+            0,
+            0,
+            0,
+            255,
+            255,
+            255,
+            255,
+            0,
+            PROTO_UDP,
+            0,
+            udp.len() as u8,
+        ];
         let split = checksum(&[&pseudo, udp]);
 
         let mut flat = pseudo.to_vec();

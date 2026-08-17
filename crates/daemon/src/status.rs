@@ -60,8 +60,8 @@ impl StatusServer {
     pub fn start() -> Result<Self> {
         // A socket left by a previous run would make bind fail.
         let _ = std::fs::remove_file(SOCKET_PATH);
-        let listener = UnixListener::bind(SOCKET_PATH)
-            .with_context(|| format!("binding {SOCKET_PATH}"))?;
+        let listener =
+            UnixListener::bind(SOCKET_PATH).with_context(|| format!("binding {SOCKET_PATH}"))?;
         listener.set_nonblocking(true)?;
 
         let shared = Arc::new(Mutex::new(Status::default()));

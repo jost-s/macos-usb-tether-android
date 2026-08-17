@@ -60,8 +60,13 @@ impl Tunnel {
             lease.prefix_len(),
         )?;
 
-        let dns = match Dns::install(&name, lease.ip, gateway, &lease.dns, lease.domain.as_deref())
-        {
+        let dns = match Dns::install(
+            &name,
+            lease.ip,
+            gateway,
+            &lease.dns,
+            lease.domain.as_deref(),
+        ) {
             Ok(dns) => Some(dns),
             // Routing still works without it; say so rather than failing.
             Err(e) => {
@@ -73,7 +78,11 @@ impl Tunnel {
         let shutdown = Arc::new(AtomicBool::new(false));
         let reader = spawn_reader(utun.clone(), link, gateway, mtu, shutdown.clone());
 
-        info!("{name} up: {}/{} via {gateway}", lease.ip, lease.prefix_len());
+        info!(
+            "{name} up: {}/{} via {gateway}",
+            lease.ip,
+            lease.prefix_len()
+        );
         Ok(Self {
             utun,
             lease,
