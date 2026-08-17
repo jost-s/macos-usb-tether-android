@@ -5,6 +5,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::Ipv4Addr;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -63,6 +64,11 @@ impl StatusServer {
         let listener =
             UnixListener::bind(SOCKET_PATH).with_context(|| format!("binding {SOCKET_PATH}"))?;
         listener.set_nonblocking(true)?;
+        // The daemon is root, so the socket would otherwise be unreachable by
+        // the user running `rndis-tetherctl`. It only serves status, and any
+        // future mutating command must gate on the peer's uid instead.
+        std::fs::set_permissions(SOCKET_PATH, std::fs::Permissions::from_mode(0o666))
+            .with_context(|| format!("relaxing permissions on {SOCKET_PATH}"))?;
 
         let shared = Arc::new(Mutex::new(Status::default()));
         let shutdown = Arc::new(AtomicBool::new(false));

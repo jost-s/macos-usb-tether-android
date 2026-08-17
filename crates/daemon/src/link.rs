@@ -84,6 +84,8 @@ impl FrameSender {
 
 pub struct Link {
     pub host_mac: MacAddr,
+    /// Frames handed to the bulk OUT endpoint.
+    pub sent: Arc<AtomicU64>,
     pub arp: Arc<Mutex<Arp>>,
     pub tx: FrameSender,
     pub events: Receiver<LinkEvent>,
@@ -108,6 +110,7 @@ impl Link {
         let (frame_tx, frame_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
         let tx = FrameSender(frame_tx);
+        let sent = Arc::new(AtomicU64::new(0));
 
         let threads = vec![
             spawn(
@@ -116,6 +119,7 @@ impl Link {
                     bulk_out,
                     frame_rx,
                     device_max_transfer_size,
+                    sent.clone(),
                     shutdown.clone(),
                 ),
             ),
@@ -138,6 +142,7 @@ impl Link {
 
         Self {
             host_mac,
+            sent,
             arp,
             tx,
             events: event_rx,
@@ -166,6 +171,7 @@ fn tx_loop(
     mut bulk_out: Box<dyn OutEndpoint>,
     frames: Receiver<Vec<u8>>,
     max_transfer_size: u32,
+    sent: Arc<AtomicU64>,
     shutdown: Arc<AtomicBool>,
 ) -> impl FnOnce() {
     move || {
@@ -202,6 +208,7 @@ fn tx_loop(
                 }
             }
             bulk_out.submit(msg);
+            sent.fetch_add(1, Ordering::Relaxed);
             reap(bulk_out.as_mut(), Duration::ZERO);
         }
 

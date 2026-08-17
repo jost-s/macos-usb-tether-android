@@ -183,12 +183,16 @@ fn run_session(
                 break Err(anyhow::anyhow!("keepalive failed: {e}"));
             }
             let delivered = sink.delivered.load(Ordering::Relaxed);
+            let sent = link.sent.load(Ordering::Relaxed);
             if let Some(s) = status {
-                s.update(|st| st.packets_in = delivered);
+                s.update(|st| {
+                    st.packets_in = delivered;
+                    st.packets_out = sent;
+                });
             }
             match &tunnel {
                 Some(t) => info!(
-                    "{} up, link {:?}, {delivered} packets in",
+                    "{} up, link {:?}, {delivered} in / {sent} out",
                     t.utun.name(),
                     device.control.link_state()
                 ),
