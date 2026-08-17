@@ -1,0 +1,36 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/usb",
+    # "crates/rndis",
+    # "crates/netstack",
+    # "crates/tun",
+    # "crates/daemon",
+    # "crates/ctl",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+
+[workspace.dependencies]
+rndis-tether-usb = { path = "crates/usb" }
+# rndis-tether-rndis = { path = "crates/rndis" }
+# rndis-tether-netstack = { path = "crates/netstack" }
+# rndis-tether-tun = { path = "crates/tun" }
+
+anyhow = "1"
+thiserror = "2"
+futures-lite = "2"
+libc = "0.2"
+log = "0.4"
+env_logger = "0.11"
+nusb = "0.2"
+rusb = "0.9"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
