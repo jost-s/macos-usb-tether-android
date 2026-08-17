@@ -476,6 +476,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rndis-tether-netstack"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "thiserror",
+]
+
+[[package]]
 name = "rndis-tether-rndis"
 version = "0.1.0"
 dependencies = [
