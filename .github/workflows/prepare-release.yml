@@ -1,10 +1,9 @@
 name: Prepare release
 
-# Keeps a pull request open that bumps the version and writes the changelog
-# from the commits since the last release. Merging it triggers Release.
+# Opens a pull request that bumps the version and writes the changelog from the
+# commits since the last release. Merging that pull request triggers Release.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
