@@ -1,7 +1,7 @@
-name: Release pull request
+name: Prepare release
 
 # Keeps a pull request open that bumps the version and writes the changelog
-# from the commits since the last release. Opening it publishes nothing.
+# from the commits since the last release. Merging it triggers Release.
 on:
   push:
     branches: [main]
@@ -10,14 +10,14 @@ permissions:
   contents: read
 
 jobs:
-  release-pr:
+  prepare:
     name: Update the release pull request
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
     concurrency:
-      group: release-pr
+      group: prepare-release
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4

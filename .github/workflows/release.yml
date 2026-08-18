@@ -1,9 +1,14 @@
 name: Release
 
-# Run by hand, from the Actions tab, once the release pull request is merged.
-# Publishes the version currently in Cargo.toml to crates.io, tags it, and
-# attaches the macOS binary.
+# Runs when the pull request from Prepare release is merged: publishes that
+# version to crates.io, tags it, and attaches the macOS binary. Ordinary merges
+# do not match, because the branch prefix is release-plz's own.
+#
+# workflow_dispatch is here to retry a run that failed part way through;
+# publishing a version that already exists on crates.io is a no-op.
 on:
+  pull_request:
+    types: [closed]
   workflow_dispatch:
 
 permissions:
@@ -15,6 +20,10 @@ env:
 jobs:
   publish:
     name: Publish to crates.io and tag
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       startsWith(github.event.pull_request.head.ref, 'release-plz-'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -25,6 +34,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # The merge commit on the default branch, which carries the bump.
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.ref }}
           fetch-depth: 0
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
