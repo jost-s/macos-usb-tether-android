@@ -32,7 +32,7 @@ jobs:
       releases_created: ${{ steps.release-plz.outputs.releases_created }}
       tag: ${{ fromJSON(steps.release-plz.outputs.releases || '[{}]')[0].tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The merge commit on the default branch, which carries the bump.
           ref: ${{ github.event.pull_request.merge_commit_sha || github.ref }}
@@ -55,7 +55,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.publish.outputs.tag }}
       # One archive covering Apple Silicon and Intel.
