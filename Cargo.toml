@@ -10,6 +10,10 @@ readme = "README.md"
 keywords = ["android", "tethering", "usb", "rndis", "macos"]
 categories = ["command-line-utilities", "network-programming"]
 
+# docs.rs builds on Linux by default, where this crate cannot compile.
+[package.metadata.docs.rs]
+targets = ["aarch64-apple-darwin"]
+
 [[bin]]
 name = "muta"
 path = "src/main.rs"

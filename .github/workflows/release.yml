@@ -24,7 +24,9 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.merged == true &&
        startsWith(github.event.pull_request.head.ref, 'release-plz-'))
-    runs-on: ubuntu-latest
+    # macOS, not Linux: cargo publish verifies by compiling, and this crate
+    # binds utun, SCDynamicStore and launchd.
+    runs-on: macos-latest
     permissions:
       contents: write
       pull-requests: read
