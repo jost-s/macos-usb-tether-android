@@ -1,0 +1,59 @@
+name: Release
+
+# Run by hand, from the Actions tab, once the release pull request is merged.
+# Publishes the version currently in Cargo.toml to crates.io, tags it, and
+# attaches the macOS binary.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    name: Publish to crates.io and tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    outputs:
+      releases_created: ${{ steps.release-plz.outputs.releases_created }}
+      tag: ${{ fromJSON(steps.release-plz.outputs.releases || '[{}]')[0].tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: release-plz/action@v0.5
+        id: release-plz
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  binary:
+    name: Attach the macOS binary
+    needs: publish
+    if: needs.publish.outputs.releases_created == 'true'
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.publish.outputs.tag }}
+      # One archive covering Apple Silicon and Intel.
+      - uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: muta
+          target: universal-apple-darwin
+          archive: $bin-$target
+          checksum: sha256
+          locked: true
+          ref: refs/tags/${{ needs.publish.outputs.tag }}
+          token: ${{ secrets.GITHUB_TOKEN }}

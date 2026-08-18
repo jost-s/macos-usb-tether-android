@@ -14,9 +14,22 @@ interface with a DHCP-obtained address and the default route.
 
 ## Install
 
+With a Rust toolchain:
+
 ```sh
-cargo install --git https://github.com/jost-s/macos-usb-tether-android muta
+cargo install muta
 ```
+
+Without one, take the prebuilt binary. It runs on both Apple Silicon and Intel:
+
+```sh
+curl -fsSL https://github.com/jost-s/macos-usb-tether-android/releases/latest/download/muta-universal-apple-darwin.tar.gz | tar xz
+```
+
+Download it with `curl`, not a browser. The binaries are unsigned, and a browser
+marks downloads with `com.apple.quarantine`, after which Gatekeeper refuses to
+run them; `curl` and `tar` do not. If you already downloaded through a browser,
+clear it with `xattr -d com.apple.quarantine muta`.
 
 Then enable **USB tethering** on the phone (on stock Android: Settings →
 Network & internet → Hotspot & tethering → USB tethering).
@@ -87,28 +100,29 @@ functional descriptor.
 
 ## Layout
 
-| Crate           | What                                                        |
-|-----------------|-------------------------------------------------------------|
-| `muta-usb`      | `UsbBackend` trait, nusb backend, RNDIS interface matching   |
-| `muta-rndis`    | RNDIS messages, control state machine, `PACKET_MSG` framing  |
-| `muta-netstack` | Ethernet, ARP, IPv4/UDP, DHCP client                         |
-| `muta-tun`      | utun socket, interface/route config, DNS                     |
-| `muta`          | the binary: hotplug, lifecycle, service install              |
+| Module     | What                                                       |
+|------------|------------------------------------------------------------|
+| `usb`      | `UsbBackend` trait, nusb backend, RNDIS interface matching  |
+| `rndis`    | RNDIS messages, control state machine, `PACKET_MSG` framing |
+| `netstack` | Ethernet, ARP, IPv4/UDP, DHCP client                        |
+| `tun`      | utun socket, interface/route config, DNS                    |
+| top level  | hotplug, lifecycle, service install                         |
 
-`muta-rndis` and `muta-netstack` are hardware-free and unit-tested against byte
-fixtures. That is deliberate: parsing device- and network-controlled binary data
-is where the bugs bite, and it is testable without a phone attached.
+`rndis` and `netstack` are hardware-free and unit-tested against byte fixtures.
+That is deliberate: parsing device- and network-controlled binary data is where
+the bugs bite, and it is testable without a phone attached. Neither imports
+`usb` or `tun`, which is what keeps them that way.
 
 ## Development
 
 ```sh
 nix develop        # or use direnv
 cargo test
-cargo clippy --workspace --all-targets
+cargo clippy --all-targets
 ```
 
-`cargo run -p muta-usb --example probe` dumps descriptors for any attached RNDIS
-device without claiming it — start there if a phone is not matched.
+`muta probe` dumps descriptors for any attached RNDIS device without claiming
+it — start there if a phone is not matched.
 
 ## Status
 
