@@ -31,13 +31,19 @@ jobs:
     outputs:
       releases_created: ${{ steps.release-plz.outputs.releases_created }}
       tag: ${{ fromJSON(steps.release-plz.outputs.releases || '[{}]')[0].tag }}
+    env:
+      BRANCH: ${{ github.event.pull_request.base.ref || github.ref_name }}
     steps:
+      # The branch the pull request merged into, whose tip is now the version
+      # bump. Checking out the merge commit instead would detach HEAD, and
+      # release-plz needs a branch with an upstream to compare against.
       - uses: actions/checkout@v7
         with:
-          # The merge commit on the default branch, which carries the bump.
-          ref: ${{ github.event.pull_request.merge_commit_sha || github.ref }}
+          ref: ${{ env.BRANCH }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Track the upstream branch
+        run: git branch --set-upstream-to=origin/"$BRANCH" "$BRANCH"
       - uses: dtolnay/rust-toolchain@stable
       - uses: release-plz/action@v0.5
         id: release-plz
