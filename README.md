@@ -69,7 +69,7 @@ Routing uses the VPN split-default trick (`0.0.0.0/1` + `128.0.0.0/1`) so the
 physical default route is never replaced and teardown is a clean delete. DNS
 goes through SCDynamicStore, not `/etc/resolv.conf`.
 
-Two details worth knowing, both learned the hard way:
+Two details govern interoperability with the phone:
 
 - **The phone designates the host's MAC.** `OID_802_3_PERMANENT_ADDRESS` returns
   the address the gadget expects *us* to use, and `muta` adopts it — exactly as
@@ -98,15 +98,6 @@ functional descriptor.
 `muta-rndis` and `muta-netstack` are hardware-free and unit-tested against byte
 fixtures. That is deliberate: parsing device- and network-controlled binary data
 is where the bugs bite, and it is testable without a phone attached.
-
-## USB backend
-
-The USB layer sits behind `UsbBackend`. nusb is the default; `--features libusb`
-swaps in an rusb (libusb) backend with no other code change.
-
-```sh
-cargo build --release --features libusb
-```
 
 ## Development
 

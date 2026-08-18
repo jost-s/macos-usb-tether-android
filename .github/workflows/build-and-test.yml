@@ -14,19 +14,14 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      # Tracks the newest stable on purpose: new lints should surface here
-      # rather than in a user's build. Expect the occasional small fix.
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
 
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
-
-      # The rusb fallback is not built by default; compile it so it cannot rot.
-      - run: cargo clippy --workspace --all-targets --features libusb -- -D warnings
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
 
   intel:
     name: Build for Intel Macs
@@ -37,16 +32,13 @@ jobs:
         with:
           targets: x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
-      # The README claims Intel support; prove it rather than assume it.
-      - run: cargo build --workspace --target x86_64-apple-darwin
+      - run: cargo build --target x86_64-apple-darwin
 
   oldest-supported-rust:
-    name: Build with the oldest supported Rust
+    name: Build with Rust 1.85
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      # Must match `rust-version` in Cargo.toml. Today that floor comes from
-      # nusb, which needs 1.85.
       - uses: dtolnay/rust-toolchain@1.85.0
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --workspace
+      - run: cargo build

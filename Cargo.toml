@@ -1,34 +1,29 @@
-[workspace]
-resolver = "2"
-members = [
-    "crates/usb",
-    "crates/rndis",
-    "crates/netstack",
-    "crates/tun",
-    "crates/muta",
-]
-
-[workspace.package]
+[package]
+name = "muta"
+description = "Android USB tethering for macOS, in userspace"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT"
 repository = "https://github.com/jost-s/macos-usb-tether-android"
+readme = "README.md"
+keywords = ["android", "tethering", "usb", "rndis", "macos"]
+categories = ["command-line-utilities", "network-programming"]
 
-[workspace.dependencies]
-muta-usb = { path = "crates/usb" }
-muta-rndis = { path = "crates/rndis" }
-muta-netstack = { path = "crates/netstack" }
-muta-tun = { path = "crates/tun" }
+[[bin]]
+name = "muta"
+path = "src/main.rs"
 
+[dependencies]
 anyhow = "1"
-thiserror = "2"
+core-foundation = "0.10"
+env_logger = "0.11"
 futures-lite = "2"
 libc = "0.2"
 log = "0.4"
-env_logger = "0.11"
 nusb = "0.2"
-rusb = "0.9"
+system-configuration = "0.8"
+thiserror = "2"
 
 [profile.release]
 opt-level = 3
