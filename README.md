@@ -78,9 +78,16 @@ interface.
 └──────────────┘         └──────────────────────────────────────────────┘
 ```
 
-Routing uses the VPN split-default trick (`0.0.0.0/1` + `128.0.0.0/1`) so the
-physical default route is never replaced and teardown is a clean delete. DNS
-goes through SCDynamicStore, not `/etc/resolv.conf`.
+Routing and DNS both come from a network service published through
+SCDynamicStore, never `/etc/resolv.conf`. macOS installs the default route via
+that service while it ranks primary, and hands it to a VPN brought up on top of
+the tether, so the VPN's traffic stays in its tunnel. Claiming the address space
+directly instead — the `0.0.0.0/1` + `128.0.0.0/1` trick VPN clients use — would
+outrank the VPN and send its traffic out through the phone in the clear.
+
+Ranking cuts the other way too: a connected Wi-Fi network outranks the tether.
+Plugging in takes over when nothing else is up; turn Wi-Fi off to prefer the
+phone over it.
 
 Two details govern interoperability with the phone:
 
