@@ -9,7 +9,7 @@ use std::thread::JoinHandle;
 use crate::netstack::Lease;
 use crate::tun::{configure_interface, net, Dns, Routes, Utun};
 use anyhow::{Context, Result};
-use log::{debug, info, warn};
+use log::{debug, info};
 
 use crate::link::{IpSink, Link};
 
@@ -34,7 +34,7 @@ pub struct Tunnel {
     pub utun: Arc<Utun>,
     pub lease: Lease,
     _routes: Routes,
-    _dns: Option<Dns>,
+    _dns: Dns,
     shutdown: Arc<AtomicBool>,
     reader: Option<JoinHandle<()>>,
 }
@@ -53,27 +53,22 @@ impl Tunnel {
         let mtu = lease.mtu.unwrap_or(DEFAULT_MTU);
         configure_interface(&name, lease.ip, gateway, mtu)?;
 
-        let routes = Routes::install_default(
+        let routes = Routes::install(
             &name,
-            gateway,
             net::subnet_of(lease.ip, lease.netmask),
             lease.prefix_len(),
         )?;
 
-        let dns = match Dns::install(
+        // macOS derives our default route from this service, so without it the
+        // tunnel would come up unable to carry anything.
+        let dns = Dns::install(
             &name,
             lease.ip,
             gateway,
             &lease.dns,
             lease.domain.as_deref(),
-        ) {
-            Ok(dns) => Some(dns),
-            // Routing still works without it; say so rather than failing.
-            Err(e) => {
-                warn!("DNS not configured: {e}");
-                None
-            }
-        };
+        )
+        .context("publishing the tunnel as a network service")?;
 
         let shutdown = Arc::new(AtomicBool::new(false));
         let reader = spawn_reader(utun.clone(), link, gateway, mtu, shutdown.clone());
