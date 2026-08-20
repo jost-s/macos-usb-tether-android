@@ -1,9 +1,10 @@
-//! DNS through SCDynamicStore.
+//! The tunnel's network service, published through SCDynamicStore.
 //!
-//! We publish a network service describing the tunnel instead of touching
-//! `/etc/resolv.conf`, which macOS regenerates. Registering the servers as a
-//! catch-all supplemental resolver makes them apply to every query without
-//! having to displace the physical interface as primary service.
+//! Publishing a service beats writing `/etc/resolv.conf`, which macOS
+//! regenerates. It also earns the default route: macOS installs one via the
+//! service's router while it ranks primary, and withdraws it in favour of a VPN
+//! that outranks us. The servers go in as a catch-all supplemental resolver, so
+//! they apply to every query without displacing anyone as primary.
 
 use std::net::Ipv4Addr;
 
@@ -24,7 +25,7 @@ pub struct Dns {
 }
 
 impl Dns {
-    /// Publish `servers` as the resolver for the tunnel.
+    /// Publish the tunnel as a network service with `servers` as its resolver.
     pub fn install(
         interface: &str,
         address: Ipv4Addr,
@@ -32,9 +33,6 @@ impl Dns {
         servers: &[Ipv4Addr],
         domain: Option<&str>,
     ) -> Result<Self> {
-        if servers.is_empty() {
-            bail!("no DNS servers in the lease");
-        }
         let Some(store) = SCDynamicStoreBuilder::new("muta").build() else {
             bail!("could not open SCDynamicStore (is the daemon running as root?)");
         };
@@ -51,6 +49,13 @@ impl Dns {
             ("InterfaceName", CFString::new(interface).as_CFType()),
         ]);
         dns.set(&format!("State:/Network/Service/{SERVICE_ID}/IPv4"), ipv4)?;
+
+        // The service above is what carries the default route, so a lease
+        // without resolvers still leaves a usable tunnel.
+        if servers.is_empty() {
+            warn!("lease carried no DNS servers; leaving the resolver alone");
+            return Ok(dns);
+        }
 
         let mut entries = vec![
             (

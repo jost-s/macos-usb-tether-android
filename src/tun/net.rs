@@ -56,28 +56,24 @@ pub struct Routes {
 }
 
 impl Routes {
-    /// Take over routing with the VPN split-default trick: two halves of the
-    /// address space beat the physical default without replacing it, so
-    /// teardown is a clean delete rather than a restore.
-    pub fn install_default(
-        interface: &str,
-        gateway: Ipv4Addr,
-        subnet: Ipv4Addr,
-        prefix: u8,
-    ) -> Result<Self> {
+    /// Install the on-link route for the phone's subnet.
+    ///
+    /// The default route deliberately is not ours. macOS installs one from the
+    /// service `Dns` publishes, for as long as that service ranks primary, and
+    /// steps aside when a VPN outranks it. Claiming the address space directly —
+    /// the `0.0.0.0/1` plus `128.0.0.0/1` pair VPNs use — would beat any VPN
+    /// layered on the tether and send its traffic out in the clear.
+    pub fn install(interface: &str, subnet: Ipv4Addr, prefix: u8) -> Result<Self> {
         let mut routes = Routes {
             destinations: Vec::new(),
         };
 
-        // The phone's own subnet, reachable directly over the tunnel.
+        // The /32 point-to-point address reaches the router, but not the rest of
+        // the subnet behind it.
         let local = format!("{subnet}/{prefix}");
         routes.add(&local, &["-interface", interface])?;
 
-        for half in ["0.0.0.0/1", "128.0.0.0/1"] {
-            routes.add(half, &[&gateway.to_string()])?;
-        }
-
-        info!("{interface}: default route via {gateway}");
+        info!("{interface}: on-link route for {local}");
         Ok(routes)
     }
 
