@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1](https://github.com/jost-s/macos-usb-tether-android/compare/v0.1.0...v0.1.1) - 2026-08-20
+
+### Fixed
+
+- *(dns)* stop answering every query while a VPN is up
+- *(net)* yield routing to a VPN layered on the tether
+
+### Other
+
+- describe how routing ranks against VPNs and Wi-Fi
+
 ## [0.1.0](https://github.com/jost-s/macos-usb-tether-android/releases/tag/v0.1.0) - 2026-08-18
 
 ### Added
