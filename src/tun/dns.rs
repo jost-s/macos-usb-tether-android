@@ -1,10 +1,13 @@
 //! The tunnel's network service, published through SCDynamicStore.
 //!
 //! Publishing a service beats writing `/etc/resolv.conf`, which macOS
-//! regenerates. It also earns the default route: macOS installs one via the
-//! service's router while it ranks primary, and withdraws it in favour of a VPN
-//! that outranks us. The servers go in as a catch-all supplemental resolver, so
-//! they apply to every query without displacing anyone as primary.
+//! regenerates. It also earns the default route and the resolver: macOS gives
+//! both to the primary service, and hands them to a VPN when one outranks us,
+//! which is what keeps the VPN's traffic inside its tunnel.
+//!
+//! Note that a plain service also loses to Wi-Fi. `OverridePrimary` would win
+//! that, but it outranks VPNs too and scopes their default route away, so the
+//! tether only takes over when nothing else is up.
 
 use std::net::Ipv4Addr;
 
@@ -57,14 +60,13 @@ impl Dns {
             return Ok(dns);
         }
 
-        let mut entries = vec![
-            (
-                "ServerAddresses",
-                array_of(&servers.iter().map(|s| s.to_string()).collect::<Vec<_>>()),
-            ),
-            // An empty match domain makes these servers apply to all queries.
-            ("SupplementalMatchDomains", array_of(&["".to_string()])),
-        ];
+        // Plain service resolvers, deliberately not supplemental: a catch-all
+        // match domain would keep answering queries while a VPN is up, sending
+        // the names being looked up to the phone.
+        let mut entries = vec![(
+            "ServerAddresses",
+            array_of(&servers.iter().map(|s| s.to_string()).collect::<Vec<_>>()),
+        )];
         if let Some(domain) = domain {
             entries.push(("DomainName", CFString::new(domain).as_CFType()));
             entries.push(("SearchDomains", array_of(&[domain.to_string()])));
