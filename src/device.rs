@@ -20,8 +20,19 @@ pub struct RndisDevice {
     _device: Box<dyn UsbDevice>,
 }
 
-/// The first attached device exposing an RNDIS function, with that function.
-pub fn find(backend: &impl UsbBackend) -> Result<Option<(DeviceInfo, RndisFunction)>> {
+/// What one scan for a phone turned up.
+pub struct Scan {
+    /// The first device exposing an RNDIS function, with that function.
+    pub rndis: Option<(DeviceInfo, RndisFunction)>,
+    /// Devices we could inspect that exposed none, complete only when `rndis`
+    /// is `None`, since the search stops at the first match. A phone lands here
+    /// whenever USB tethering is off: macOS leaves it unclaimed either way.
+    pub idle: Vec<String>,
+}
+
+/// Look for an attached device exposing an RNDIS function.
+pub fn find(backend: &impl UsbBackend) -> Result<Scan> {
+    let mut idle = Vec::new();
     for info in backend.list().context("listing USB devices")? {
         let device = match backend.open(info.id) {
             Ok(d) => d,
@@ -39,10 +50,14 @@ pub fn find(backend: &impl UsbBackend) -> Result<Option<(DeviceInfo, RndisFuncti
             }
         };
         if let Some(function) = find_rndis(&configs) {
-            return Ok(Some((info, function)));
+            return Ok(Scan {
+                rndis: Some((info, function)),
+                idle,
+            });
         }
+        idle.push(info.label());
     }
-    Ok(None)
+    Ok(Scan { rndis: None, idle })
 }
 
 /// Claim the interfaces and run the RNDIS bring-up sequence.
