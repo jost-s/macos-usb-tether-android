@@ -41,25 +41,33 @@ pub fn run() -> Result<()> {
     let mut watch = backend.watch().ok();
     info!("waiting for a phone with USB tethering enabled");
 
+    let mut reported = Vec::new();
+
     while !signals::requested() {
         match device::find(&backend) {
-            Ok(Some((info, function))) => {
-                let label = info.label();
-                if let Some(s) = &status {
-                    s.update(|st| st.device = Some(label.clone()));
+            Ok(scan) => match scan.rndis {
+                Some((info, function)) => {
+                    reported.clear();
+                    let label = info.label();
+                    if let Some(s) = &status {
+                        s.update(|st| st.device = Some(label.clone()));
+                    }
+                    if let Err(e) = run_session(&backend, info, function, status.as_ref()) {
+                        error!("session ended: {e:#}");
+                    }
+                    if let Some(s) = &status {
+                        s.update(|st| *st = Status::default());
+                    }
+                    if !signals::requested() {
+                        info!("waiting for the phone to come back");
+                        std::thread::sleep(RETRY_DELAY);
+                    }
                 }
-                if let Err(e) = run_session(&backend, info, function, status.as_ref()) {
-                    error!("session ended: {e:#}");
+                None => {
+                    report_idle(&scan.idle, &mut reported);
+                    wait_for_attach(&mut watch);
                 }
-                if let Some(s) = &status {
-                    s.update(|st| *st = Status::default());
-                }
-                if !signals::requested() {
-                    info!("waiting for the phone to come back");
-                    std::thread::sleep(RETRY_DELAY);
-                }
-            }
-            Ok(None) => wait_for_attach(&mut watch),
+            },
             Err(e) => {
                 warn!("scanning for devices failed: {e:#}");
                 std::thread::sleep(RETRY_DELAY);
@@ -69,6 +77,20 @@ pub fn run() -> Result<()> {
 
     info!("shutting down");
     Ok(())
+}
+
+/// Name the devices that are attached without an RNDIS function, once per
+/// change rather than once per scan. A phone that is plugged in but not
+/// tethering looks exactly like this, and is the usual reason the wait drags on.
+fn report_idle(seen: &[String], reported: &mut Vec<String>) {
+    if reported.as_slice() == seen {
+        return;
+    }
+    for label in seen {
+        info!("{label} is attached but not tethering; enable USB tethering on the phone");
+    }
+    reported.clear();
+    reported.extend_from_slice(seen);
 }
 
 /// Block until something is plugged in, or the wait elapses.
