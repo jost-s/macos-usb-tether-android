@@ -20,6 +20,10 @@ const CONTROL_SIGNATURES: &[(u8, u8, u8)] = &[
     (0xE0, 0x01, 0x03),
     // Communications / ACM / vendor-specific — Microsoft's original encoding.
     (0x02, 0x02, 0xFF),
+    // Misc class encoding — modern Android gadgets (Xiaomi 13 Ultra on
+    // HyperOS, Huawei Mate 50 Pro) and the Novatel USB730L; Linux
+    // rndis_host.c matches it too.
+    (0xEF, 0x04, 0x01),
 ];
 
 /// Everything needed to drive one RNDIS function.
@@ -193,6 +197,20 @@ mod tests {
             value: 1,
             interfaces: vec![
                 control_iface(0, (0x02, 0x02, 0xFF), android_cdc_extra()),
+                data_iface(1),
+            ],
+        };
+        assert!(find_rndis(&[config]).is_some());
+    }
+
+    #[test]
+    fn matches_misc_class_4_1_signature() {
+        // The encoding modern Android gadgets use (verified on a Xiaomi 13
+        // Ultra and a Huawei Mate 50 Pro), same as Linux's Novatel entry.
+        let config = ConfigDescriptor {
+            value: 1,
+            interfaces: vec![
+                control_iface(0, (0xEF, 0x04, 0x01), android_cdc_extra()),
                 data_iface(1),
             ],
         };

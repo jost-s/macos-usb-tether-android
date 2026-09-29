@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- *(usb)* match the Misc class RNDIS control interface (0xEF/0x04/0x01) that modern Android gadgets advertise
+
 ## [0.1.2](https://github.com/jost-s/macos-usb-tether-android/compare/v0.1.1...v0.1.2) - 2026-08-21
 
 ### Added
