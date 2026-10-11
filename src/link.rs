@@ -13,6 +13,7 @@ use crate::netstack::ethernet::{self, MacAddr, ETHERTYPE_ARP, ETHERTYPE_IPV4};
 use crate::netstack::ipv4::{self, UdpDatagram};
 use crate::netstack::Arp;
 use crate::rndis::{packet, wire};
+use crate::usb::error::UsbError;
 use crate::usb::{InEndpoint, OutEndpoint};
 use log::{debug, error, info, trace, warn};
 
@@ -22,6 +23,10 @@ const RX_DEPTH: usize = 16;
 const TX_DEPTH: usize = 8;
 /// How long threads block before re-checking the shutdown flag.
 const TICK: Duration = Duration::from_millis(200);
+/// How long a single `wait` may block while draining a cancelled queue.
+const DRAIN_TIMEOUT: Duration = Duration::from_millis(250);
+/// Consecutive stalls tolerated before the session is failed and re-attached.
+const MAX_CONSECUTIVE_STALLS: u32 = 5;
 /// DHCP retransmit backoff, capped.
 const DHCP_RETRY_MIN: Duration = Duration::from_secs(1);
 const DHCP_RETRY_MAX: Duration = Duration::from_secs(16);
@@ -312,11 +317,61 @@ fn reap(bulk_out: &mut dyn OutEndpoint, timeout: Duration) {
             Some(Ok(())) => {}
             Some(Err(e)) => {
                 debug!("bulk OUT transfer failed: {e}");
+                if matches!(e, UsbError::Stall) {
+                    // A halted pipe rejects every later submit too, so clear it
+                    // rather than wedge TX for the rest of the session.
+                    if let Err(e) = recover_bulk_out(bulk_out) {
+                        debug!("could not clear the stalled bulk OUT endpoint: {e}");
+                    }
+                }
                 break;
             }
             None => break,
         }
     }
+}
+
+/// Drop the queued reads, clear the halt, and refill the read queue.
+///
+/// A stall leaves the pipe halted. On macOS every later submit is then rejected
+/// with `kIOUSBPipeStalled` until the halt is cleared, so one stall would
+/// otherwise kill RX for the rest of the session. The queued reads have to go
+/// first: `CLEAR_FEATURE(ENDPOINT_HALT)` is only valid on an idle endpoint.
+fn recover_bulk_in(bulk_in: &mut dyn InEndpoint, transfer_size: usize) -> Result<(), UsbError> {
+    bulk_in.cancel_all();
+    for _ in 0..=RX_DEPTH {
+        if bulk_in.pending() == 0 {
+            break;
+        }
+        bulk_in.wait(DRAIN_TIMEOUT);
+    }
+    if bulk_in.pending() > 0 {
+        return Err(UsbError::Other(
+            "bulk IN reads did not drain after cancel".to_string(),
+        ));
+    }
+    bulk_in.clear_halt()?;
+    for _ in 0..RX_DEPTH {
+        bulk_in.submit(transfer_size);
+    }
+    Ok(())
+}
+
+/// Clear a halted bulk OUT pipe so later batches are not rejected.
+fn recover_bulk_out(bulk_out: &mut dyn OutEndpoint) -> Result<(), UsbError> {
+    bulk_out.cancel_all();
+    for _ in 0..=TX_DEPTH {
+        if bulk_out.pending() == 0 {
+            break;
+        }
+        bulk_out.wait(DRAIN_TIMEOUT);
+    }
+    if bulk_out.pending() > 0 {
+        return Err(UsbError::Other(
+            "bulk OUT transfers did not drain after cancel".to_string(),
+        ));
+    }
+    bulk_out.clear_halt()
 }
 
 struct RxContext {
@@ -351,18 +406,36 @@ fn rx_loop(
         let mut dhcp_state = DhcpTimer::new();
         send_dhcp(&ctx, &dhcp.discover());
 
+        let mut stalls = 0u32;
         while !shutdown.load(Ordering::Relaxed) {
             match bulk_in.wait(TICK) {
                 Some(Ok(data)) => {
+                    stalls = 0;
                     bulk_in.submit(transfer_size as usize);
                     handle_transfer(&ctx, &mut dhcp, &mut dhcp_state, &data);
                 }
-                Some(Err(e)) => {
-                    bulk_in.submit(transfer_size as usize);
-                    if e.is_fatal() {
-                        let _ = ctx.events.send(LinkEvent::Failed(e.to_string()));
+                Some(Err(e)) if e.is_fatal() => {
+                    let _ = ctx.events.send(LinkEvent::Failed(e.to_string()));
+                    return;
+                }
+                Some(Err(UsbError::Stall)) => {
+                    stalls += 1;
+                    if stalls > MAX_CONSECUTIVE_STALLS {
+                        let _ = ctx.events.send(LinkEvent::Failed(format!(
+                            "bulk IN endpoint stalled {stalls} times in a row"
+                        )));
                         return;
                     }
+                    match recover_bulk_in(bulk_in.as_mut(), transfer_size as usize) {
+                        Ok(()) => debug!("cleared a stalled bulk IN endpoint"),
+                        Err(e) => {
+                            let _ = ctx.events.send(LinkEvent::Failed(e.to_string()));
+                            return;
+                        }
+                    }
+                }
+                Some(Err(e)) => {
+                    bulk_in.submit(transfer_size as usize);
                     debug!("bulk IN transfer failed: {e}");
                 }
                 None => {}
@@ -517,5 +590,109 @@ pub fn try_next_event(events: &Receiver<LinkEvent>) -> Option<LinkEvent> {
             error!("link event channel closed");
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+
+    /// Scripted bulk IN endpoint: `submit` enqueues a read, `wait` hands back
+    /// queued results, and `cancel_all` turns the queue into cancellations
+    /// unless the endpoint is wedged (aborted reads that never come back).
+    struct FakeIn {
+        pending: usize,
+        submits: usize,
+        cancels: usize,
+        halts: usize,
+        wedge: bool,
+        results: VecDeque<Result<Vec<u8>, UsbError>>,
+    }
+
+    impl FakeIn {
+        fn new() -> Self {
+            Self {
+                pending: 0,
+                submits: 0,
+                cancels: 0,
+                halts: 0,
+                wedge: false,
+                results: VecDeque::new(),
+            }
+        }
+
+        /// Return one queued read as if it had already completed.
+        fn take(&mut self) {
+            self.pending -= 1;
+            self.results.pop_front();
+        }
+    }
+
+    impl InEndpoint for FakeIn {
+        fn submit(&mut self, _len: usize) {
+            self.submits += 1;
+            self.pending += 1;
+            self.results.push_back(Ok(Vec::new()));
+        }
+
+        fn wait(&mut self, _timeout: Duration) -> Option<Result<Vec<u8>, UsbError>> {
+            if self.wedge || self.pending == 0 {
+                return None;
+            }
+            self.pending -= 1;
+            Some(self.results.pop_front().unwrap())
+        }
+
+        fn pending(&self) -> usize {
+            self.pending
+        }
+
+        fn cancel_all(&mut self) {
+            self.cancels += 1;
+            if self.wedge {
+                return;
+            }
+            self.results.clear();
+            for _ in 0..self.pending {
+                self.results.push_back(Err(UsbError::Timeout));
+            }
+        }
+
+        fn clear_halt(&mut self) -> Result<(), UsbError> {
+            self.halts += 1;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn recovers_a_stalled_bulk_in_endpoint() {
+        let mut ep = FakeIn::new();
+        for _ in 0..RX_DEPTH {
+            ep.submit(16384);
+        }
+        // The stalled read was already returned; the rest are still queued.
+        ep.take();
+
+        recover_bulk_in(&mut ep, 16384).expect("recovery succeeds");
+
+        assert_eq!(ep.cancels, 1, "queued reads are aborted first");
+        assert_eq!(ep.halts, 1, "the halt is cleared once");
+        assert_eq!(ep.pending, RX_DEPTH, "the read queue is refilled");
+        assert_eq!(ep.submits, RX_DEPTH * 2, "one fresh read per queue slot");
+    }
+
+    #[test]
+    fn refuses_to_clear_halt_while_reads_are_pending() {
+        let mut ep = FakeIn::new();
+        for _ in 0..RX_DEPTH {
+            ep.submit(16384);
+        }
+        ep.take();
+        // Aborting leaves the queued reads stuck.
+        ep.wedge = true;
+
+        assert!(recover_bulk_in(&mut ep, 16384).is_err());
+        assert_eq!(ep.halts, 0, "no clear_halt while transfers are pending");
     }
 }

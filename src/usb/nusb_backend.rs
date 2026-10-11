@@ -287,6 +287,18 @@ impl<T: nusb::transfer::BulkOrInterrupt> InEndpoint for NusbIn<T> {
         }
         self.ep.wait_next_complete(timeout).map(completion_bytes)
     }
+
+    fn pending(&self) -> usize {
+        self.ep.pending()
+    }
+
+    fn cancel_all(&mut self) {
+        self.ep.cancel_all();
+    }
+
+    fn clear_halt(&mut self) -> Result<()> {
+        self.ep.clear_halt().wait().map_err(err)
+    }
 }
 
 struct NusbOut<T: nusb::transfer::BulkOrInterrupt> {
@@ -313,6 +325,14 @@ impl<T: nusb::transfer::BulkOrInterrupt> OutEndpoint for NusbOut<T> {
         self.ep
             .wait_next_complete(timeout)
             .map(|c| c.status.map_err(transfer_err))
+    }
+
+    fn cancel_all(&mut self) {
+        self.ep.cancel_all();
+    }
+
+    fn clear_halt(&mut self) -> Result<()> {
+        self.ep.clear_halt().wait().map_err(err)
     }
 }
 
