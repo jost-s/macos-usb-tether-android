@@ -57,6 +57,14 @@ pub trait InEndpoint: Send {
     /// `len` is rounded up to a multiple of the max packet size, as USB requires.
     fn submit(&mut self, len: usize);
     fn wait(&mut self, timeout: Duration) -> Option<Result<Vec<u8>>>;
+    /// Reads submitted but not yet returned by `wait`.
+    fn pending(&self) -> usize;
+    /// Abort every queued read. They come back from `wait` as errors, so the
+    /// caller must drain them. Needed before `clear_halt`.
+    fn cancel_all(&mut self);
+    /// Clear a stall (`CLEAR_FEATURE(ENDPOINT_HALT)`) and reset the data toggle.
+    /// Only valid with no transfers pending.
+    fn clear_halt(&mut self) -> Result<()>;
 }
 
 /// A queue of write transfers. `submit` never blocks; completions must be
@@ -66,4 +74,10 @@ pub trait OutEndpoint: Send {
     fn pending(&self) -> usize;
     fn submit(&mut self, data: Vec<u8>);
     fn wait(&mut self, timeout: Duration) -> Option<Result<()>>;
+    /// Abort every queued write. They come back from `wait` as errors, so the
+    /// caller must drain them. Needed before `clear_halt`.
+    fn cancel_all(&mut self);
+    /// Clear a stall (`CLEAR_FEATURE(ENDPOINT_HALT)`) and reset the data toggle.
+    /// Only valid with no transfers pending.
+    fn clear_halt(&mut self) -> Result<()>;
 }
