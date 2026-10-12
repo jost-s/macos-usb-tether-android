@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3](https://github.com/jost-s/macos-usb-tether-android/compare/v0.1.2...v0.1.3) - 2026-10-12
+
+### Fixed
+
+- *(usb)* clear a stalled bulk endpoint and resume
+
 ### Fixed
 
 - *(usb)* clear a stalled bulk endpoint and resume, instead of wedging the link
