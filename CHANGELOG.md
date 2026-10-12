@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.3](https://github.com/jost-s/macos-usb-tether-android/compare/v0.1.2...v0.1.3) (2026-10-12)
+
+
+### Bug Fixes
+
+* **usb:** clear a stalled bulk endpoint and resume ([5279b2e](https://github.com/jost-s/macos-usb-tether-android/commit/5279b2ea6db86aadc0c843bb406e5d55b4deebb5))
+
+
+### Continuous Integration
+
+* refactor to release please ([d42f6b3](https://github.com/jost-s/macos-usb-tether-android/commit/d42f6b36ce18a510f1323fac1073f40deede1975))
+
 ## [0.1.2](https://github.com/jost-s/macos-usb-tether-android/compare/v0.1.1...v0.1.2) - 2026-08-21
 
 ### Added
