@@ -1,71 +1,76 @@
 name: Release
 
-# Runs when the pull request from Prepare release is merged: publishes that
-# version to crates.io, tags it, and attaches the macOS binary. Ordinary merges
-# do not match, because the branch prefix is release-plz's own.
+# Runs on every push to main. release-please keeps the release PR current; when a
+# merge cuts a release it bumps the version, writes CHANGELOG.md, creates the
+# vX.Y.Z tag and publishes the GitHub release. This same run then publishes to
+# crates.io and attaches the macOS binary.
 #
 # workflow_dispatch is here to retry a run that failed part way through;
 # publishing a version that already exists on crates.io is a no-op.
 on:
-  pull_request:
-    types: [closed]
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  issues: write
+  pull-requests: write
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      # A GitHub App token rather than GITHUB_TOKEN or a PAT: GITHUB_TOKEN-created
+      # events don't trigger workflows (so build-and-test.yml wouldn't run on the
+      # release PR), and a PAT would author the PR as its owner, who can't
+      # approve it.
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          app-id: ${{ vars.RELEASE_AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
   publish:
-    name: Publish to crates.io and tag
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.pull_request.merged == true &&
-       startsWith(github.event.pull_request.head.ref, 'release-plz-'))
+    name: Publish to crates.io
+    needs: release-please
+    # Only when this run actually cut a release.
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
     # macOS, not Linux: cargo publish verifies by compiling, and this crate
     # binds utun, SCDynamicStore and launchd.
     runs-on: macos-latest
-    permissions:
-      contents: write
-      pull-requests: read
-    outputs:
-      releases_created: ${{ steps.release-plz.outputs.releases_created }}
-      tag: ${{ fromJSON(steps.release-plz.outputs.releases || '[{}]')[0].tag }}
-    env:
-      BRANCH: ${{ github.event.pull_request.base.ref || github.ref_name }}
     steps:
-      # The branch the pull request merged into, whose tip is now the version
-      # bump. Checking out the merge commit instead would detach HEAD, and
-      # release-plz needs a branch with an upstream to compare against.
       - uses: actions/checkout@v7
         with:
-          ref: ${{ env.BRANCH }}
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Track the upstream branch
-        run: git branch --set-upstream-to=origin/"$BRANCH" "$BRANCH"
+          ref: ${{ needs.release-please.outputs.tag_name }}
       - uses: dtolnay/rust-toolchain@stable
-      - uses: release-plz/action@v0.5
-        id: release-plz
-        with:
-          command: release
+      - run: cargo publish --locked
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   binary:
     name: Attach the macOS binary
-    needs: publish
-    if: needs.publish.outputs.releases_created == 'true'
+    needs: [release-please, publish]
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
     runs-on: macos-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.publish.outputs.tag }}
+          ref: ${{ needs.release-please.outputs.tag_name }}
       # One archive covering Apple Silicon and Intel.
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
@@ -74,5 +79,5 @@ jobs:
           archive: $bin-$target
           checksum: sha256
           locked: true
-          ref: refs/tags/${{ needs.publish.outputs.tag }}
+          ref: refs/tags/${{ needs.release-please.outputs.tag_name }}
           token: ${{ secrets.GITHUB_TOKEN }}
