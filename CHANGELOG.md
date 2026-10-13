@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/jost-s/macos-usb-tether-android/compare/v0.1.3...v0.1.4) (2026-10-13)
+
+
+### Bug Fixes
+
+* **usb:** match Misc class RNDIS control interface (0xEF/0x04/0x01) ([76fc16c](https://github.com/jost-s/macos-usb-tether-android/commit/76fc16c7464ac27ae288db6d10dedac5427794cd))
+
 ## [0.1.3](https://github.com/jost-s/macos-usb-tether-android/compare/v0.1.2...v0.1.3) (2026-10-12)
 
 
