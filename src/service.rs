@@ -190,8 +190,9 @@ fn plist(binary: &Path) -> String {
     <key>StandardErrorPath</key>
     <string>{LOG_PATH}</string>
 
+    <!-- On the packet path: Background throttling stalls the link while the Mac is busy, e.g. after boot. -->
     <key>ProcessType</key>
-    <string>Background</string>
+    <string>Interactive</string>
 </dict>
 </plist>
 "#,
