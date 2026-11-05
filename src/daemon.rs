@@ -9,12 +9,12 @@ use crate::netstack::MacAddr;
 use crate::rndis::HOST_MAX_TRANSFER_SIZE;
 use crate::usb::{NusbBackend, UsbBackend};
 use anyhow::Result;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 
 use crate::link::{self, Link, LinkEvent, SwitchableSink, TxLimits};
 use crate::status::{Status, StatusServer};
 use crate::tunnel::Tunnel;
-use crate::{device, signals};
+use crate::{device, service, signals};
 
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(10);
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -27,6 +27,7 @@ const HOTPLUG_WAIT: Duration = Duration::from_secs(2);
 /// Run until interrupted. Returns once a shutdown signal has been handled.
 pub fn run() -> Result<()> {
     signals::install();
+    let rotating = service::follow_log_rotation();
 
     let backend = NusbBackend;
     let status = match StatusServer::start() {
@@ -76,6 +77,9 @@ pub fn run() -> Result<()> {
     }
 
     info!("shutting down");
+    if rotating {
+        service::release_log();
+    }
     Ok(())
 }
 
@@ -202,7 +206,7 @@ fn run_session(
                 (bytes.saturating_sub(before)) as f64 * 8.0 / KEEPALIVE_INTERVAL.as_secs_f64() / 1e6
             };
             match &tunnel {
-                Some(t) => info!(
+                Some(t) => debug!(
                     "{} up, link {:?}, {:.1}/{:.1} Mbit/s in/out, {delivered} in / {sent} out, {:.2} frames/transfer",
                     t.utun.name(),
                     device.control.link_state(),
