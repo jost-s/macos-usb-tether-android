@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.5](https://github.com/jost-s/macos-usb-tether-android/compare/v0.1.4...v0.1.5) (2026-11-05)
+
+
+### Bug Fixes
+
+* log rotation after a sighup ([249c463](https://github.com/jost-s/macos-usb-tether-android/commit/249c463ddc60ffcc11c9ad1ab2c094855cba3ba8))
+* **service:** stop throttling the daemon as a background job ([e7750e7](https://github.com/jost-s/macos-usb-tether-android/commit/e7750e7d8a00fb08866392f951b9ab996f0812ba))
+
 ## [0.1.4](https://github.com/jost-s/macos-usb-tether-android/compare/v0.1.3...v0.1.4) (2026-10-13)
 
 
