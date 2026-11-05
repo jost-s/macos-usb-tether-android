@@ -5,14 +5,16 @@
 //! would let any admin-level process replace the binary and gain root at the
 //! next launch — hence the dedicated root-owned directory below.
 
-use std::ffi::CString;
-use std::os::unix::fs::PermissionsExt;
+use std::ffi::{CStr, CString};
+use std::os::fd::AsFd;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
-use log::info;
+use log::{info, warn};
 
+use crate::signals;
 use crate::status::SOCKET_PATH;
 
 pub const LABEL: &str = "com.github.jost-s.muta";
@@ -20,6 +22,9 @@ const INSTALL_DIR: &str = "/usr/local/libexec/muta";
 const PLIST_PATH: &str = "/Library/LaunchDaemons/com.github.jost-s.muta.plist";
 const NEWSYSLOG_PATH: &str = "/etc/newsyslog.d/muta.conf";
 pub const LOG_PATH: &str = "/var/log/muta.log";
+pub const LOG_PATH_C: &CStr = c"/var/log/muta.log";
+/// Where newsyslog finds the daemon to signal after rotating the log.
+const PID_PATH: &str = "/var/run/muta.pid";
 
 fn installed_binary() -> PathBuf {
     Path::new(INSTALL_DIR).join("muta")
@@ -72,6 +77,7 @@ pub fn uninstall() -> Result<()> {
         PLIST_PATH,
         NEWSYSLOG_PATH,
         LOG_PATH,
+        PID_PATH,
         SOCKET_PATH,
         &installed_binary().to_string_lossy(),
     ] {
@@ -192,7 +198,7 @@ fn plist(binary: &Path) -> String {
 
     <!-- On the packet path: Background throttling stalls the link while the Mac is busy, e.g. after boot. -->
     <key>ProcessType</key>
-    <string>Interactive</string>
+    <string>Standard</string>
 </dict>
 </plist>
 "#,
@@ -200,8 +206,39 @@ fn plist(binary: &Path) -> String {
     )
 }
 
-/// The daemon logs every 10s forever; without this the log grows without bound.
+/// `B` keeps newsyslog's own "turned over" line out of the log.
 const NEWSYSLOG_CONF: &str = "\
-# logfilename          [owner:group]  mode count size  when flags
-/var/log/muta.log      root:wheel     644   5     1000  *    J
+# logfilename          [owner:group]  mode count size  when flags [/pid_file]
+/var/log/muta.log      root:wheel     644   5     1000  *    JB    /var/run/muta.pid
 ";
+
+/// Under launchd stdout/stderr are the log file, which newsyslog moves aside;
+/// without reopening it, output goes to the rotated file and is lost. Returns
+/// whether this process took that on, i.e. runs as the service.
+pub fn follow_log_rotation() -> bool {
+    if !stderr_is_log() {
+        return false;
+    }
+    signals::reopen_log_on_hangup();
+    if let Err(e) = std::fs::write(PID_PATH, format!("{}\n", std::process::id())) {
+        warn!("writing {PID_PATH}: {e}; output after the next log rotation will be lost");
+    }
+    true
+}
+
+pub fn release_log() {
+    let _ = std::fs::remove_file(PID_PATH);
+}
+
+fn stderr_is_log() -> bool {
+    let Ok(stderr) = std::io::stderr().as_fd().try_clone_to_owned() else {
+        return false;
+    };
+    match (
+        std::fs::File::from(stderr).metadata(),
+        std::fs::metadata(LOG_PATH),
+    ) {
+        (Ok(a), Ok(b)) => (a.dev(), a.ino()) == (b.dev(), b.ino()),
+        _ => false,
+    }
+}
